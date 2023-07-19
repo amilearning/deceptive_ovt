@@ -116,8 +116,17 @@ class MPCC_H2H_approx(AbstractController):
         self.track_length = track.track_length
 
         self.num_std_deviations = control_params.num_std_deviations
-        self.policy_map = {None: self.no_blocking_policy, "aggressive_blocking": self.aggressive_blocking_policy,
-                           "only_left": self.only_left_blocking_policy, "only_right": self.only_right_blocking_policy, "timid": self.no_blocking_policy}
+        self.policy_map = {None: self.no_blocking_policy, 
+                            "aggressive_blocking": self.aggressive_blocking_policy,
+                           "only_left": self.only_left_blocking_policy, 
+                           "only_right": self.only_right_blocking_policy,
+                           "timid": self.no_blocking_policy,
+                           "reverse": self.reverse_blocking_policy,
+                           "mild_100": self.aggressive_blocking_policy,
+                           "mild_200": self.aggressive_blocking_policy,
+                           "mild_300": self.aggressive_blocking_policy,
+                           "mild_1000": self.aggressive_blocking_policy,
+                           "mild_5000": self.mild_5000_blocking_policy}
 
         self.optlevel = control_params.optlevel
 
@@ -761,6 +770,50 @@ class MPCC_H2H_approx(AbstractController):
         # Copy solver config.
         pickle_write([self.control_params, self.track_name], os.path.join(self.install_dir, 'params.pkl'))
         self.solver = forcespro.nlp.Solver.from_directory(self.install_dir)
+
+
+    def reverse_blocking_policy(self, ego_state: VehicleState, tv_state: VehicleState,
+                                   tv_prediction: VehiclePrediction = None):        
+        if tv_state is not None and tv_state.p.s < ego_state.p.s:
+            blocking = True
+            xt = tv_state.p.x_tran
+            x_ref = -1*np.sign(xt) * min(self.track.half_width, abs(float(xt)))
+        else:
+            # non-blocking mode
+            x_ref = -20
+            blocking = False
+        return x_ref, blocking
+
+    def mild_half_blocking_policy(self, ego_state: VehicleState, tv_state: VehicleState,
+                                   tv_prediction: VehiclePrediction = None):
+        """
+        Aggressive Blocking Policy. Will try to match x_tran of tv_state at all costs.
+        """
+        if tv_state is not None and tv_state.p.s < ego_state.p.s:
+            blocking = True
+            xt = tv_state.p.x_tran
+            x_ref = np.sign(xt)/2.0 * min(self.track.half_width, abs(float(xt/2.0)))
+        else:
+            # non-blocking mode
+            x_ref = -20
+            blocking = False
+        return x_ref, blocking
+
+    def mild_5000_blocking_policy(self, ego_state: VehicleState, tv_state: VehicleState,
+                                   tv_prediction: VehiclePrediction = None):
+        """
+        Aggressive Blocking Policy. Will try to match x_tran of tv_state at all costs.
+        """
+        if tv_state is not None and tv_state.p.s < ego_state.p.s:
+            blocking = True
+            xt = tv_state.p.x_tran
+            x_ref = np.sign(xt) * min(self.track.half_width, abs(float(xt*2)))
+        else:
+            # non-blocking mode
+            x_ref = -20
+            blocking = False
+        return x_ref, blocking
+
 
     def aggressive_blocking_policy(self, ego_state: VehicleState, tv_state: VehicleState,
                                    tv_prediction: VehiclePrediction = None):

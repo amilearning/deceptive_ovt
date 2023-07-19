@@ -29,16 +29,16 @@ from barcgp.prediction.gp_controllers import GPControllerApproximate
 # scenchicane_dir = os.path.join(policy_dir, 'chicane')
 
 
-# policy_name = 'race'
-# policy_dir = os.path.join(train_dir, policy_name)
-# track_scencurve_dir = os.path.join(policy_dir, 'track')
+policy_name = 'race'
+policy_dir = os.path.join(train_dir, policy_name)
+track_scencurve_dir = os.path.join(policy_dir, 'track')
 
 
 # dirs = [wall_scencurve_dir, scencurve_dir] # , wall_scenstraight_dir,wall_scenchicane_dir , scencurve_dir,scenstraight_dir,  scenchicane_dir, timid_scencurve_dir,timid_scenstraight_dir, timid_scenchicane_dir]
 # Training
 def gp_main(dirs):
     
-    # dirs = [track_scencurve_dir]
+    dirs = [track_scencurve_dir]
     # change curve type in file_utils
     sampGen = SampleGenerator(dirs, randomize=True)
     sampGen.plotStatistics('c')

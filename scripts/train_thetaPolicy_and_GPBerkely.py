@@ -21,11 +21,11 @@ t_scenchicane_dir = os.path.join(t_policy_dir, 'chicane')
 # track_scencurve_dir = os.path.join(policy_dir, 'track')
 
 
-# policy_name = 'wall'
-# policy_dir = os.path.join(train_dir, policy_name)
-# wall_scencurve_dir = os.path.join(policy_dir, 'curve')
-# wall_scenstraight_dir = os.path.join(policy_dir, 'straight')
-# wall_scenchicane_dir = os.path.join(policy_dir, 'chicane')
+policy_name = 'wall'
+policy_dir = os.path.join(train_dir, policy_name)
+wall_scencurve_dir = os.path.join(policy_dir, 'curve')
+wall_scenstraight_dir = os.path.join(policy_dir, 'straight')
+wall_scenchicane_dir = os.path.join(policy_dir, 'chicane')
 
 
 dirs = [a_scencurve_dir, a_scenstraight_dir, a_scenchicane_dir,t_scencurve_dir, t_scenstraight_dir, t_scenchicane_dir]

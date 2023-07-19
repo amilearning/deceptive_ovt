@@ -10,7 +10,7 @@ from barcgp.common.utils.file_utils import *
 
 from barcgp.common.pytypes import VehicleActuation, VehicleState, BodyLinearVelocity, ParametricPose, VehiclePrediction
 from barcgp.dynamics.models.model_types import DynamicBicycleConfig
-from barcgp.common.utils.scenario_utils import SimData, EvalData, smoothPlotResults, ScenarioGenParams, ScenarioGenerator
+from barcgp.common.utils.scenario_utils import MultiPolicyEvalData, SimData, EvalData, smoothPlotResults, ScenarioGenParams, ScenarioGenerator
 
 from barcgp.controllers.MPCC_H2H_approx import MPCC_H2H_approx
 
@@ -20,11 +20,12 @@ import multiprocessing as mp
 from barcgp.h2h_configs import *
 from barcgp.prediction.trajectory_predictor import ConstantVelocityPredictor, ConstantAngularVelocityPredictor, GPPredictor, NoPredictor, NLMPCPredictor, MPCPredictor
 from barcgp.common_control import run_pid_warmstart
-from barcgp.prediction.thetapolicy_predictor import ThetaPolicyPredictor
+
+from barcgp.prediction.cont_encoder.cont_thetapolicy_predictor import ContThetaPolicyPredictor
 total_runs = 100
 M = 50
-target_policy_name = 'aggressive_blocking'
-folder_name = 'random_test'
+target_policy_name = 'timid'
+folder_name = 'timid'
 tp_model_name = 'tphmcl' # this is not used 
 gp_model_name = 'gpberkely'
 track_types = ['straight','curve', 'chicane']
@@ -34,16 +35,15 @@ policy_dir = os.path.join(eval_dir, folder_name)
 
 predictors = [GPPredictor(N, None, gp_model_name, True, M, cov_factor=np.sqrt(2)),
                 # GPPredictor(N, None, gp_model_name, True, M, cov_factor=1),
-                    GPPredictor(N, None, gp_model_name, True, M, cov_factor=np.sqrt(0.5)),
-                    ThetaPolicyPredictor(N, None, tp_model_name, True, M, cov_factor=np.sqrt(2)),            
-                    # ThetaPolicyPredictor(N, None, tp_model_name, True, M, cov_factor=np.sqrt(1)),            
-                    ThetaPolicyPredictor(N, None, tp_model_name, True, M, cov_factor=np.sqrt(0.5)),            
+                    # GPPredictor(N, None, gp_model_name, True, M, cov_factor=np.sqrt(0.5)),
+                    ContThetaPolicyPredictor(N, None, tp_model_name, True, M, cov_factor=np.sqrt(2)),                                
+                    # ContThetaPolicyPredictor(N, None, tp_model_name, True, M, cov_factor=np.sqrt(0.5)),            
                 ConstantAngularVelocityPredictor(N, cov=.01),
                 # ConstantAngularVelocityPredictor(N, cov=.005),
-                ConstantAngularVelocityPredictor(N, cov=.0),
+                # ConstantAngularVelocityPredictor(N, cov=.0),
                 NLMPCPredictor(N, None, cov=.01, v_ref=mpcc_tv_params.vx_max),
                 # NLMPCPredictor(N, None, cov=.005, v_ref=mpcc_tv_params.vx_max),
-                NLMPCPredictor(N, None, cov=.0, v_ref=mpcc_tv_params.vx_max)
+                # NLMPCPredictor(N, None, cov=.0, v_ref=mpcc_tv_params.vx_max)
               ]
 
 
@@ -51,7 +51,8 @@ predictors = [GPPredictor(N, None, gp_model_name, True, M, cov_factor=np.sqrt(2)
 """ConstantVelocityPredictor(N), ConstantAngularVelocityPredictor(N),
 NoPredictor(N), MPCPredictor(N), NLMPCPredictor(N, None)]"""
 # names = ["GP2", "GP1", "GP_5 ","TP_2 ","TP_1 ","TP_5 ", "CAV_01", "CAV_005", "CAV0", "NLMPC_01", "NLMPC_005", "NLMPC0"]
-names = ["GP2", "GP_5 ","TP_2 ","TP_5 ", "CAV_01",  "CAV0", "NLMPC_01",  "NLMPC0"]
+# names = ["GP2", "GP_5 ","TP_2 ","TP_5 ", "CAV_01",  "CAV0", "NLMPC_01",  "NLMPC0"]
+names = ["GP_2", "TP_2 ","CAV_01", "NLMPC_01"]
 
 
 
@@ -66,17 +67,16 @@ def main(args=None):
                                     tarMax=tarMax,
                                     width=width)
     scen_gen = ScenarioGenerator(scen_params)
-    gp_params = []
-    gpp_params =[]
+    gp_params = []    
     params = []
     d = 0
     for i in range(total_runs):
         scen = scen_gen.genScenario()
-        offset = np.random.uniform(0, 30)
+        offset =  0 # np.random.uniform(0, 30)
         for k in range(len(names)):
             predictors[k].track = scen.track
 
-            if isinstance(predictors[k], GPPredictor) or  isinstance(predictors[k], ThetaPolicyPredictor):
+            if isinstance(predictors[k], GPPredictor) or  isinstance(predictors[k], ContThetaPolicyPredictor):
                 gp_params.append((dt, t, N, names[k], predictors[k], scen, i+d, offset))
             
             else:
@@ -108,7 +108,7 @@ def runSimulation(dt, t, N, name, predictor, scenario, id, offset=0):
     tv_history, ego_history, vehiclestate_history, ego_sim_state, tar_sim_state, egost_list, tarst_list = run_pid_warmstart(
         scenario, ego_dynamics_simulator, tar_dynamics_simulator, n_iter=n_iter, t=t, offset=offset)
 
-    if isinstance(predictor, GPPredictor) or isinstance(predictor, ThetaPolicyPredictor):
+    if isinstance(predictor, GPPredictor) or isinstance(predictor, ContThetaPolicyPredictor):
         mpcc_ego_controller = MPCC_H2H_approx(ego_dynamics_simulator.model, track_obj, gp_mpcc_ego_params, name="gp_mpcc_h2h_ego", track_name='track')
     else:
         mpcc_ego_controller = MPCC_H2H_approx(ego_dynamics_simulator.model, track_obj, mpcc_ego_params, name="mpcc_h2h_ego", track_name='track')
@@ -129,7 +129,10 @@ def runSimulation(dt, t, N, name, predictor, scenario, id, offset=0):
 
     ego_prediction, tar_prediction, tv_pred = None, None, None
     while True:
-        if tar_sim_state.p.s >= 1.9 * scenario.length - offset or ego_sim_state.p.s >= 1.9 * scenario.length - offset or ego_sim_state.t > 37:
+        # if tar_sim_state.p.s >= 0.8 * scenario.length - offset or ego_sim_state.p.s >= 0.8 * scenario.length - offset or ego_sim_state.t > 37:
+        if ego_sim_state.v.v_long < 0 or tar_sim_state.v.v_long < 0:
+            break 
+        if tar_sim_state.p.s >= 0.8 * scenario.length or ego_sim_state.p.s >= 0.8 * scenario.length:
             break
         else:
             if predictor:
@@ -169,13 +172,20 @@ def runSimulation(dt, t, N, name, predictor, scenario, id, offset=0):
             tarpred_list.append(tar_prediction)
             # print('Current time', ego_sim_state.t)
 
+
     scenario_sim_data = EvalData(scenario, len(egost_list), egost_list, tarst_list, egopred_list, tarpred_list, gp_tarpred_list, tv_infeasible=tv_inf, ego_infeasible=ego_inf)
+    
+    if isinstance(predictor, GPPredictor) or isinstance(predictor, ContThetaPolicyPredictor):
+        ego_config = gp_mpcc_ego_params
+    else:
+        ego_config = mpcc_ego_params
+
+    multi_policy_sim_data = MultiPolicyEvalData(ego_config = ego_config, tar_config = mpcc_tv_params, evaldata = scenario_sim_data)
     root_dir = os.path.join(policy_dir, scenario.track_type)
     create_dir(path=root_dir)
     root_dir = os.path.join(root_dir, name)
     create_dir(path=root_dir)
-    pickle_write(scenario_sim_data, os.path.join(root_dir, str(id) + '.pkl'))
-
+    pickle_write(multi_policy_sim_data, os.path.join(root_dir, str(id) + '.pkl'))
 
 if __name__ == '__main__':
     main()

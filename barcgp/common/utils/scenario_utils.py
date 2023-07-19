@@ -57,7 +57,11 @@ class PostprocessData:
     avg_abs_steer: float = field(default=0)  # Average abs steer value
     # Prediction metrics
     lateral_errors: List = field(default_factory=lambda: [])
+    
     longitudinal_errors: List = field(default_factory=lambda: [])
+
+    horizon_lateral_rmse: List = field(default_factory=lambda: [])
+    horizon_longitudinal_rmse: List = field(default_factory=lambda: [])
     # Feasibility Data
     ego_infesible_ids: List = field(default_factory=lambda: [])
     tv_infesible_ids: List = field(default_factory=lambda: [])
@@ -116,6 +120,11 @@ class EvalData(SimData):
     ego_infeasible: bool = field(default=False)
 
 
+@dataclass
+class MultiPolicyEvalData():
+    ego_config: MPCCApproxFullModelParams = field(default=MPCCApproxFullModelParams)
+    tar_config: MPCCApproxFullModelParams = field(default=MPCCApproxFullModelParams)
+    evaldata: EvalData = field(default=EvalData)
 
 @dataclass
 class ScenarioGenParams:
@@ -311,7 +320,7 @@ class SampleGenerator():
                     ######################## random Policy ############################
                     policy_name = ab_p.split('/')[-2]
                     policy_gen = False
-                    if policy_name == 'wall':
+                    if policy_name.__contains__('wall'):
                         policy_gen = True
                         tar_dynamics_simulator = DynamicsSimulator(0, tar_dynamics_config, track=scenario_data.scenario_def.track)                    
                     

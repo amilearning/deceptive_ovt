@@ -191,6 +191,9 @@ class ContPolicyEncoder:
                 print("Evaluation Score : [{}]".format(eval_loss))
                 
                 self.model = model
+                
+                if epoch%100 == 0:
+                    self.model_save(model_id=epoch)
 
         def get_theta_from_buffer(self,input_for_encoder):      
             if len(input_for_encoder.shape) <3:
@@ -216,6 +219,7 @@ class ContPolicyEncoder:
             model = self.model 
             model.eval()
             z_tmp_list = []
+            input_list = []
             with torch.no_grad():
                 for i, batch_data in train_iterator:    
                                 
@@ -224,6 +228,8 @@ class ContPolicyEncoder:
                     z_tmp = model.get_latent_z(train_data)
                     if z_tmp.shape[0] == args['batch_size']:
                         z_tmp_list.append(z_tmp)
+                        input_list.append(train_data)
                 stacked_z_tmp = torch.cat(z_tmp_list, dim=0)
+                input_list_tmp= torch.cat(input_list, dim=0)
 
-            return stacked_z_tmp
+            return stacked_z_tmp, input_list_tmp

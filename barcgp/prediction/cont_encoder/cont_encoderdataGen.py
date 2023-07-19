@@ -97,7 +97,8 @@ class SampleGeneartorContEncoder(SampleGenerator):
 
         ## filter 
         if filter:
-            samples = [item for item in self.samples if sum(item[:,0] < 0.5) > 2]
+            # samples = [item for item in self.samples if sum((item[:,0] < 0.5) and item[:,0] > 0.5) > 2]
+            samples = [item for item in self.samples if sum((0.5 > item[:, 0]) & (item[:, 0] > 0.0)) > 2]
             samp_len = len(samples)
         else:
             samples= torch.stack(self.samples).to(torch.device("cuda"))  

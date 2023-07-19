@@ -15,7 +15,7 @@ from barcgp.common_control import run_pid_warmstart
 
 total_runs = 1000
 
-target_policy_name = 'timid'
+target_policy_name = 'mild_300'
 
 policy_dir = os.path.join(train_dir, target_policy_name)
 track_types = ['straight','curve', 'chicane']

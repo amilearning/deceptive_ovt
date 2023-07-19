@@ -3,15 +3,15 @@
 from barcgp.common.utils.file_utils import *
 import numpy as np
 import torch
-from barcgp.prediction.cont_encoder.cont_encoderdataGen import SampleGeneartorContEncoder
-from barcgp.prediction.cont_encoder.cont_policyEncoder import ContPolicyEncoder
+from barcgp.prediction.deception.deception_dataGen import SampleGeneartorDeceptionEncoder
+from barcgp.prediction.deception.deception_module import DeceptionEncoder
 from torch.utils.data import DataLoader, random_split
 
 
 # Training
-def cont_encoder_train(dirs):
+def deception_encoder_train(dirs):
 
-    sampGen = SampleGeneartorContEncoder(dirs, randomize=True)
+    sampGen = SampleGeneartorDeceptionEncoder(dirs, randomize=True)
     
     sampGen.plotStatistics()
     
@@ -29,7 +29,7 @@ def cont_encoder_train(dirs):
                 "hidden_size": 8,
                 "latent_size": 4,
                 "learning_rate": 0.0005,
-                "max_iter": 180000,
+                "max_iter": 1800000,
                 "seq_len" :5
             }
     batch_size = args_["batch_size"]
@@ -40,22 +40,22 @@ def cont_encoder_train(dirs):
 
 
     
-    policy_encoder = ContPolicyEncoder(args= args_)    
-    policy_encoder.set_train_loader(train_loader)
-    policy_encoder.set_test_loader(test_loader)
+    deception_policy_encoder = DeceptionEncoder(args= args_)    
+    deception_policy_encoder.set_train_loader(train_loader)
+    deception_policy_encoder.set_test_loader(test_loader)
 
-    policy_encoder.train(args= args_)
+    deception_policy_encoder.train(args= args_)
     
     create_dir(path=model_dir)
-    policy_encoder.model_save()
+    deception_policy_encoder.model_save()
     
 
 
 # T-SNE analysis 
 
-def tsne_cont_encoder(a_dirs, b_dirs):
-    a_sampGen = SampleGeneartorContEncoder(a_dirs, randomize=True)
-    b_sampGen = SampleGeneartorContEncoder(b_dirs, randomize=True)
+def tsne_deception_encoder(a_dirs, b_dirs):
+    a_sampGen = SampleGeneartorDeceptionEncoder(a_dirs, randomize=True)
+    b_sampGen = SampleGeneartorDeceptionEncoder(b_dirs, randomize=True)
     
     a_train_dataset, a_val_dataset, a_test_dataset  = a_sampGen.get_datasets(filter= True)
     b_train_dataset, b_val_dataset, b_test_dataset  = b_sampGen.get_datasets(filter= True)
@@ -80,22 +80,25 @@ def tsne_cont_encoder(a_dirs, b_dirs):
     b_train_loader = DataLoader(b_train_dataset, batch_size=batch_size, shuffle=True)    
     b_test_loader = DataLoader(b_test_dataset, batch_size=batch_size, shuffle=False)
 
-    a_policy_encoder = ContPolicyEncoder(args= args_)    
+    a_policy_encoder = DeceptionEncoder(args= args_, train_= False)    
     a_policy_encoder.set_train_loader(a_train_loader)
     a_policy_encoder.set_test_loader(a_test_loader)
-    a_policy_encoder.model_load()
+    model_id_ = 500
+    phase_num_ = 1
+    a_policy_encoder.model_load(model_id= model_id_, train_phase = phase_num_)
 
-    b_policy_encoder = ContPolicyEncoder(args= args_)    
+    b_policy_encoder = DeceptionEncoder(args= args_, train_= False)    
     b_policy_encoder.set_train_loader(b_train_loader)
     b_policy_encoder.set_test_loader(b_test_loader)
-    b_policy_encoder.model_load()
+    b_policy_encoder.model_load(model_id = model_id_, train_phase = phase_num_)
 
     print("a stacked z init")
-    a_stacked_z = a_policy_encoder.tsne_evaluate()
+    a_stacked_z, a_input= a_policy_encoder.tsne_evaluate()
     print("b stacked z init")
-    b_stacked_z = b_policy_encoder.tsne_evaluate()
+    b_stacked_z, b_input = b_policy_encoder.tsne_evaluate()
 
     stacked_z = torch.vstack([a_stacked_z,b_stacked_z]).cpu()    
+    stacked_input = torch.vstack([a_input,b_input]).cpu()    
     # label generate 
     a_y_label = torch.ones(a_stacked_z.shape[0])
     b_y_label = torch.ones(b_stacked_z.shape[0])*2.0
@@ -110,8 +113,8 @@ def tsne_cont_encoder(a_dirs, b_dirs):
     for i in range(1):
         ###################################        
         dim = 2        
-        perplexity_ = 150
-        n_iter_ = 800        
+        perplexity_ = 300
+        n_iter_ = 1500        
 
         ###################################
         tsne_model = TSNE(n_components=dim,perplexity=perplexity_, verbose= 2,n_iter=n_iter_)        
@@ -129,7 +132,23 @@ def tsne_cont_encoder(a_dirs, b_dirs):
             plt.show()
             # cbar = plt.colorbar()
             # cbar.set_label('Color Bar Label')
-        
+            for i in range(10):
+                points = plt.ginput(1)
+                x_clicked, y_clicked = points[0]
+                dists = np.sqrt((theta_2d[:, 0] - x_clicked)**2 + (theta_2d[:, 1] - y_clicked)**2)
+                index = np.argmin(dists)
+                print("clicked x = ",round(x_clicked,1), ", clicked y = ", round(y_clicked,1))
+                # print(np.around(filted_data[index,:],3))
+                print("tars-egos = " ,   np.round(stacked_input[index,0,0].cpu(),3))
+                print("tar_ey = " ,      np.round(stacked_input[index,0,1].cpu(),3))
+                print("tar_epsi = " ,    np.round(stacked_input[index,0,2].cpu(),3))
+                print("tar_vx = " ,    np.round(stacked_input[index,0,3].cpu(),3))
+                print("tar_cur = "  ,     np.round(stacked_input[index,0,4].cpu(),3))
+                print("ego_ey = "   ,      np.round(stacked_input[index,0,5].cpu(),3))
+                print("ego_epsi = " ,    np.round(stacked_input[index,0,6].cpu(),3))
+                print("ego_vx = "  ,     np.round(stacked_input[index,0,7].cpu(),3))                                
+                print("ego_cur = "  ,     np.round(stacked_input[index,0,8].cpu(),3))       
+                print("y_label = " ,   y_label[index])
     
 
 

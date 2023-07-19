@@ -101,6 +101,7 @@ class ContLSTMAutomodel(nn.Module):
             # evaluation -> batch is 1 
             batch_size = 1 
             seq_len, feature_dim = x.shape
+            x = x.unsqueeze(dim=0)
         else:
             batch_size, seq_len, feature_dim = x.shape
 

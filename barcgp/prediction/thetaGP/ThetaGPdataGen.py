@@ -1,6 +1,7 @@
 from barcgp.common.utils.scenario_utils import *
-from barcgp.prediction.encoder.policyEncoder import PolicyEncoder
-from barcgp.prediction.encoder.encoderdataGen import states_to_encoder_input_torch
+# from barcgp.prediction.encoder.policyEncoder import PolicyEncoder
+from barcgp.prediction.cont_encoder.cont_policyEncoder import ContPolicyEncoder
+from barcgp.prediction.cont_encoder.cont_encoderdataGen import states_to_encoder_input_torch
 from barcgp.simulation.dynamics_simulator import DynamicsSimulator
 from barcgp.h2h_configs import *    
 from barcgp.common.utils.scenario_utils import policy_generator
@@ -16,7 +17,7 @@ class SampleGeneartorThetaGP(SampleGenerator):
         #                  
         # Output from ThetaGP (t+1)
         #               [tar_vlong, tar_vlat, tar_wz]
-        self.encoder_model = PolicyEncoder()
+        self.encoder_model = ContPolicyEncoder()
         self.encoder_input_dim = self.encoder_model.input_dim
         self.encoder_time_horizon = self.encoder_model.seq_len
         self.encoder_output_dim = self.encoder_model.output_dim

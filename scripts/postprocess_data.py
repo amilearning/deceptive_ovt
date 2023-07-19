@@ -14,17 +14,17 @@ from barcgp.common.utils.scenario_utils import EvalData, PostprocessData
 from barcgp.h2h_configs import *
 
 total_runs = 100
-track_width = 1.5
+track_width = width
 blocking_threshold = 0.2  # Percentage of track x_tran movement to consider for blocking
 
-policy_name = 'aggressive_blocking'
+policy_name = 'random_test'
 policy_dir = os.path.join(eval_dir, policy_name)
-scen_dir = os.path.join(policy_dir, 'track')
+scen_dir = policy_dir # os.path.join(policy_dir, 'track')
 
 names = sorted(os.listdir(scen_dir), key=str)
 print(names)
 names_for_legend = names 
-names_for_legend = ['GP', 'NMPC', 'Proposed']
+names_for_legend = ['NaiveGP', 'NMPC', 'CAV', 'Proposed']
 colors = {"GP": "y", "NLMPC": "b", "CAV": "g", "CV": "m", "MPCC": "k", "STSP": "y", "TP": "r"}
 find_color = lambda pred: [val for key, val in colors.items() if key in pred].__getitem__(0)
 
@@ -292,6 +292,53 @@ def derive_lateral_long_error_from_true_traj(sim_data : EvalData, check_only_blo
     return np.array(lateral_error), np.array(longitudinal_error)
 
 
+def multi_policy_lat_lon_error(sim_data : EvalData):
+    """
+    @param sim_data: Input evaluation data where we are comparing against `tar_states` (true trajectory)
+    @return:
+    lateral_error (list of l_1 errors)
+    longitudinal_error (list of l_1 errors)
+    """
+
+    total_lateral_error = []
+    total_longitunidal_error = []    
+    track = sim_data.scenario_def.track
+    samps = 0
+    for timeStep in range(len(sim_data.tar_states)-1):
+        lateral_error = []
+        longitudinal_error = []
+        pred = sim_data.tar_gp_pred[timeStep]  # (VehiclePrediction) at current timestep, what is GP prediction
+        ego_states = sim_data.ego_states[timeStep]
+        tar_states = sim_data.tar_states[timeStep] 
+        data_skip = True
+        if (tar_states.p.s - ego_states.p.s) < 0.5 and  (tar_states.p.s - ego_states.p.s) > 0.0:
+            data_skip = False
+        if data_skip: 
+            continue
+        if pred is not None and (pred.x is not None or pred.s is not None):
+            N = len(pred.s) if pred.s else len(pred.x)
+            if N + timeStep - 1 < len(sim_data.tar_states):
+                samps += 1
+                for i in range(1, N):
+                    tar_st = sim_data.tar_states[timeStep + i]  # (VehicleState) current target state from true traveled trajectory
+                    if not pred.s:
+                        dx = tar_st.x.x - pred.x[i]
+                        dy = tar_st.x.y - pred.y[i]
+                        angle = sim_data.scenario_def.track.local_to_global((tar_st.p.s, 0, 0))[2]
+                        longitudinal = dx * np.cos(angle) + dy * np.sin(angle)
+                        lateral = -dx * np.sin(angle) + dy * np.cos(angle)
+                    else:
+                        longitudinal = pred.s[i] - tar_st.p.s
+                        lateral = pred.x_tran[i] - tar_st.p.x_tran
+                    longitudinal_error.append(longitudinal)
+                    lateral_error.append(lateral)
+        
+                total_longitunidal_error.append(np.array(longitudinal_error))
+                total_lateral_error.append(np.array(lateral_error))
+                
+    return np.array(total_lateral_error), np.array(total_longitunidal_error)
+
+
 def get_metrics(scen_data: EvalData):
     # TODO: This iterates over all times multiple times! Fix this
     metrics = Metrics()
@@ -329,7 +376,8 @@ def get_metrics(scen_data: EvalData):
     metrics.d_s_cont = Lead.get_results()
     metrics.col_d = inter
     metrics.init_ds = scen_data.ego_states[0].p.s - scen_data.tar_states[0].p.s
-    metrics.lateral_error, metrics.longitudinal_error = derive_lateral_long_error_from_true_traj(scen_data, check_only_blocking=False)
+    # metrics.lateral_error, metrics.longitudinal_error = derive_lateral_long_error_from_true_traj(scen_data, check_only_blocking=False)
+    metrics.lateral_error, metrics.longitudinal_error = multi_policy_lat_lon_error(scen_data)
     u = Act.get_results()
     metrics.lateral_rmse = np.sqrt(np.mean(metrics.lateral_error ** 2))
     if sum(np.isnan(metrics.lateral_error)) > 0:
@@ -446,6 +494,8 @@ def main(args=None):
                     if processed_data[a].track is None:
                         processed_data[a].track = scenario_data.scenario_def.track
                     metrics = get_metrics(scenario_data)
+                    
+                    
                     parse_metrics(metrics, processed_data[a], i)
 
                     scores[id] = metrics.delta_s

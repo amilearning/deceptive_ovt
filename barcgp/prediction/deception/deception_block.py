@@ -19,14 +19,11 @@ class DeceptionNet(nn.Module):
             nn.Linear(8, input_dim)
         )
     
-    def forward(self, x, bypass = True):
-        if bypass: 
-            out = x 
-        else:
-            # Encode the input
-            encoded = self.encoder(x)
-            # Decode the encoded representation
-            out = self.decoder(encoded)
+    def forward(self, x):
+        # Encode the input
+        encoded = self.encoder(x)
+        # Decode the encoded representation
+        out = self.decoder(encoded)
         return out
 
 
@@ -241,7 +238,7 @@ class DeceptionBasedModel(nn.Module):
         perturb_weight = 1.0
         perturb_loss = F.mse_loss(perturb_theta,orig_theta)*perturb_weight                
         recons_loss = F.mse_loss(recons, ptb_recons)                
-        loss = perturb_loss - recons_loss
+        loss = perturb_loss +1/(recons_loss+1e-20)
         return {
             "loss": loss,            
             "perturb_loss" : perturb_loss.detach(),
