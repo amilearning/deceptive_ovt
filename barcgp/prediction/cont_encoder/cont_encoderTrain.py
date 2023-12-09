@@ -9,9 +9,9 @@ from torch.utils.data import DataLoader, random_split
 
 
 # Training
-def cont_encoder_train(dirs):
+def cont_encoder_train(dirs,realdata = False):
 
-    sampGen = SampleGeneartorContEncoder(dirs, randomize=True)
+    sampGen = SampleGeneartorContEncoder(dirs, randomize=True, realdata = realdata)
     
     sampGen.plotStatistics()
     
@@ -29,7 +29,7 @@ def cont_encoder_train(dirs):
                 "hidden_size": 8,
                 "latent_size": 4,
                 "learning_rate": 0.0005,
-                "max_iter": 1800000,
+                "max_iter": 18000,
                 "seq_len" :5
             }
     batch_size = args_["batch_size"]

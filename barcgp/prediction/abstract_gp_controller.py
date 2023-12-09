@@ -45,7 +45,7 @@ class GPController(ABC):
         self.stds_y = None
         self.pull_samples()  # will initialize model
 
-    def pull_samples(self, holdout=150):
+    def pull_samples(self, holdout=100):
         self.train_x = torch.zeros((self.sample_generator.getNumSamples() - holdout, self.input_size))  # [ego_state | tv_state]
         self.test_x = torch.zeros((holdout, self.input_size))  # [ego_state | tv_state]
         self.train_y = torch.zeros([self.sample_generator.getNumSamples() - holdout, self.output_size])  # [tv_actuation]

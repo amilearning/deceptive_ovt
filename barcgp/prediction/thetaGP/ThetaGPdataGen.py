@@ -6,7 +6,7 @@ from barcgp.simulation.dynamics_simulator import DynamicsSimulator
 from barcgp.h2h_configs import *    
 from barcgp.common.utils.scenario_utils import policy_generator
 class SampleGeneartorThetaGP(SampleGenerator):
-    def __init__(self, abs_path, randomize=False, elect_function=None, init_all=True):
+    def __init__(self, abs_path, randomize=False, realdata = False, elect_function=None, init_all=True):
 
         # Input for ThetaGP -> (t)         
         #               [(tar_s-ego_s),            
@@ -34,12 +34,15 @@ class SampleGeneartorThetaGP(SampleGenerator):
         self.samples = []
         self.output_data = []
         self.info = []
-                
+       
         for ab_p in self.abs_path:
             for filename in os.listdir(ab_p):
                 if filename.endswith(".pkl"):
                     dbfile = open(os.path.join(ab_p, filename), 'rb')
-                    scenario_data: SimData = pickle.load(dbfile)
+                    if realdata:
+                        scenario_data: RealData = pickle.load(dbfile)
+                    else:
+                        scenario_data: SimData = pickle.load(dbfile)
                     N = scenario_data.N                       
                     if N > self.encoder_time_horizon+5:
                         ######################## random Policy ############################
@@ -47,52 +50,58 @@ class SampleGeneartorThetaGP(SampleGenerator):
                         policy_gen = False
                         if policy_name == 'wall':
                             policy_gen = True
-                            tar_dynamics_simulator = DynamicsSimulator(0, tar_dynamics_config, track=scenario_data.scenario_def.track)                    
+                            if realdata:
+                                tar_dynamics_simulator = DynamicsSimulator(0, tar_dynamics_config, track=scenario_data.track)                    
+                            else:
+                                tar_dynamics_simulator = DynamicsSimulator(0, tar_dynamics_config, track=scenario_data.scenario_def.track)                    
                         ###################################################################
-                        for t in range(N-1-self.encoder_time_horizon-1):                            
-                            # define empty torch with proper size 
-                            dat = torch.zeros(self.encoder_time_horizon, self.encoder_input_dim).to(torch.device("cuda"))  
-                            for i in range(t,t+self.encoder_time_horizon):                                
-                                ego_st = scenario_data.ego_states[i]
-                                tar_st = scenario_data.tar_states[i] 
-                                ######################## random Policy ############################
-                                if policy_gen:
-                                    scenario_data.tar_states[i+1] = policy_generator(tar_dynamics_simulator,scenario_data.tar_states[i])                  
-                                ###################################################################
-                                next_tar_st = scenario_data.tar_states[i+1]                                                               
-                                # [(tar_s-ego_s), ego_ey, ego_epsi, ego_cur,ego_accel, ego_delta,
-                                #                 tar_ey, tar_epsi, tar_cur,tar_accel, tar_delta]                                 
-                                dat[i-t,:]=states_to_encoder_input_torch(tar_st, ego_st)
-                            
-                            theta = self.encoder_model.get_theta(dat,np = False).squeeze()
-                            # theta[:] =  0
-                                    #               [(tar_s-ego_s),            
-        #                 tar_ey, tar_epsi, tar_vlong, tar_vlat, tar_wz,             
-    #                       ego_ey, ego_epsi, ego_vlong,
-        #                    tar_cur(0,1,2),]   
-                            state_input = torch.tensor([tar_st.p.s - ego_st.p.s,
-                                                            tar_st.p.x_tran,
-                                                            tar_st.p.e_psi,                                                            
-                                                            tar_st.v.v_long,
-                                                            tar_st.v.v_tran,
-                                                            tar_st.w.w_psi,                                                                                                                        
-                                                            ego_st.p.x_tran,
-                                                            ego_st.p.e_psi,
-                                                            ego_st.v.v_long,                                                           
-                                                            tar_st.lookahead.curvature[0],
-                                                            tar_st.lookahead.curvature[1],
-                                                            tar_st.lookahead.curvature[2]]).to(torch.device("cuda"))  
-                            gp_input = torch.hstack([state_input, theta])  # 12 + theta_dim(5)   
-                            # gp_input = state_input 
-                            gp_output = torch.tensor([next_tar_st.v.v_long-tar_st.v.v_long, next_tar_st.v.v_tran-tar_st.v.v_tran, next_tar_st.w.w_psi-tar_st.w.w_psi])
-                            self.samples.append(gp_input)  
-                            self.output_data.append(gp_output)    
+                        for t in range(N-1-self.encoder_time_horizon-1):    
+                            if len(scenario_data.tar_states) == len(scenario_data.ego_states) and scenario_data.ego_states[t] is not None and scenario_data.tar_states[t] is not None:                                             
+                                # define empty torch with proper size 
+                                dat = torch.zeros(self.encoder_time_horizon, self.encoder_input_dim).to(torch.device("cuda"))  
+                                for i in range(t,t+self.encoder_time_horizon):    
+                                                        
+                                    
+                                    ego_st = scenario_data.ego_states[i]
+                                    tar_st = scenario_data.tar_states[i] 
+                                    ######################## random Policy ############################
+                                    if policy_gen:
+                                        scenario_data.tar_states[i+1] = policy_generator(tar_dynamics_simulator,scenario_data.tar_states[i])                  
+                                    ###################################################################
+                                    next_tar_st = scenario_data.tar_states[i+1]                                                               
+                                    # [(tar_s-ego_s), ego_ey, ego_epsi, ego_cur,ego_accel, ego_delta,
+                                    #                 tar_ey, tar_epsi, tar_cur,tar_accel, tar_delta]                                 
+                                    dat[i-t,:]=states_to_encoder_input_torch(tar_st, ego_st)
+                                
+                                theta = self.encoder_model.get_theta(dat,np = False).squeeze()
+                                
+                                        #               [(tar_s-ego_s),            
+            #                 tar_ey, tar_epsi, tar_vlong, tar_vlat, tar_wz,             
+        #                       ego_ey, ego_epsi, ego_vlong,
+            #                    tar_cur(0,1,2),]   
+                                state_input = torch.tensor([tar_st.p.s - ego_st.p.s,
+                                                                tar_st.p.x_tran,
+                                                                tar_st.p.e_psi,                                                            
+                                                                tar_st.v.v_long,
+                                                                tar_st.v.v_tran,
+                                                                tar_st.w.w_psi,                                                                                                                        
+                                                                ego_st.p.x_tran,
+                                                                ego_st.p.e_psi,
+                                                                ego_st.v.v_long,                                                           
+                                                                tar_st.lookahead.curvature[0],
+                                                                tar_st.lookahead.curvature[1],
+                                                                tar_st.lookahead.curvature[2]]).to(torch.device("cuda"))  
+                                gp_input = torch.hstack([state_input, theta])  # 12 + theta_dim(5)   
+                                # gp_input = state_input 
+                                gp_output = torch.tensor([next_tar_st.v.v_long-tar_st.v.v_long, next_tar_st.v.v_tran-tar_st.v.v_tran, next_tar_st.w.w_psi-tar_st.w.w_psi])
+                                self.samples.append(gp_input)  
+                                self.output_data.append(gp_output)    
                             
                     
                     dbfile.close()
                 
         print('Generated Dataset with', len(self.samples), 'samples!')
-        
+       
         # if randomize:
         #     random.shuffle(self.samples)
     

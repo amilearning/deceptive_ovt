@@ -36,11 +36,11 @@ from barcgp.prediction.gp_controllers import GPControllerApproximate
 
 # dirs = [wall_scencurve_dir, scencurve_dir] # , wall_scenstraight_dir,wall_scenchicane_dir , scencurve_dir,scenstraight_dir,  scenchicane_dir, timid_scencurve_dir,timid_scenstraight_dir, timid_scenchicane_dir]
 # Training
-def gp_main(dirs):
+def gp_main(dirs,realdata = False):
     
     # dirs = [track_scencurve_dir]
     # change curve type in file_utils
-    sampGen = SampleGenerator(dirs, randomize=True)
+    sampGen = SampleGenerator(dirs, randomize=True,realdata = realdata)
     # sampGen.plotStatistics('c')
     # sampGen.even_augment('s', 0.3)
     if not dir_exists(dirs[0]):
@@ -61,7 +61,7 @@ def gp_main(dirs):
     create_dir(path=model_dir)
     gp_name = 'gpberkely'
     gp_controller.save_model(gp_name)
-    # gp_controller.evaluate()
+    gp_controller.evaluate()
 
 
 # if __name__ == "__main__":

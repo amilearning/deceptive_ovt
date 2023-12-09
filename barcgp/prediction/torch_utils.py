@@ -21,6 +21,32 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import matplotlib.transforms as transforms
 
+def display_array_in_window(data, cmap='viridis'):
+    """
+    Display a NumPy array in a separate window using Matplotlib.
+
+    Args:
+    data (numpy.ndarray): The array to display.
+    cmap (str): The colormap to use for visualization (default: 'viridis').
+
+    Returns:
+    None
+    """
+    fig, ax = plt.subplots()
+    im = ax.imshow(data, cmap=cmap)
+    plt.colorbar(im)
+    ax.grid(True, linestyle='--', linewidth=0.5, color='gray')
+
+
+    # def close_window(event):
+    #     if event.key or event.button:
+    #         plt.close()
+
+    # fig.canvas.mpl_connect('key_press_event', close_window)
+    # fig.canvas.mpl_connect('button_press_event', close_window)
+
+    plt.show()
+
 def drawElipse(ax,mean,std):
     # create mean and standard deviation
     # mean = np.array([1, 2])  # mean

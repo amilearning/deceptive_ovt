@@ -17,7 +17,7 @@ def states_to_encoder_input_torch(tar_st,ego_st):
 
 
 class SampleGeneartorContEncoder(SampleGenerator):
-    def __init__(self, abs_path, randomize=False, elect_function=None, init_all=True):
+    def __init__(self, abs_path, randomize=False, realdata = False, elect_function=None, init_all=True):
         '''
         abs path: List of absolute paths of directories containing files to be used for training
         randomize: boolean deciding whether samples should be returned in a random order or by time and file
@@ -47,38 +47,46 @@ class SampleGeneartorContEncoder(SampleGenerator):
             for filename in os.listdir(ab_p):
                 if filename.endswith(".pkl"):
                     dbfile = open(os.path.join(ab_p, filename), 'rb')
-                    scenario_data: SimData = pickle.load(dbfile)
+                    if realdata:
+                        scenario_data: RealData = pickle.load(dbfile)
+                    else:
+                        scenario_data: SimData = pickle.load(dbfile)
                     N = scenario_data.N                       
                     ######################## random Policy ############################
                     policy_name = ab_p.split('/')[-2]
                     policy_gen = False
                     if policy_name == 'wall':
                         policy_gen = True
-                        tar_dynamics_simulator = DynamicsSimulator(0, tar_dynamics_config, track=scenario_data.scenario_def.track)                    
+                        if realdata:
+                            tar_dynamics_simulator = DynamicsSimulator(0, tar_dynamics_config, track=scenario_data.track)                    
+                        else:
+                            tar_dynamics_simulator = DynamicsSimulator(0, tar_dynamics_config, track=scenario_data.scenario_def.track)                    
                     ###################################################################
                     if N > self.time_horizon+5:
-                        for t in range(N-1-self.time_horizon):                            
-                            # define empty torch with proper size 
-                            dat = torch.zeros(self.time_horizon, self.input_dim)
-                            
-                            for i in range(t,t+self.time_horizon):                                
-                                ego_st = scenario_data.ego_states[i]
-                                tar_st = scenario_data.tar_states[i]
-                                if policy_gen:
-                                    scenario_data.tar_states[i+1] = policy_generator(tar_dynamics_simulator,scenario_data.tar_states[i])                  
-                                # [(tar_s-ego_s), ego_ey, ego_epsi, ego_cur,
-                                #                 tar_ey, tar_epsi, tar_cur]                                 
-                                dat[i-t,:]=states_to_encoder_input_torch(tar_st, ego_st)
-                                # torch.tensor([ tar_st.p.s - ego_st.p.s,
-                                #                             ego_st.p.x_tran,
-                                #                             ego_st.p.e_psi,
-                                #                             ego_st.lookahead.curvature[0],                                                            
-                                #                             tar_st.p.x_tran,
-                                #                             tar_st.p.e_psi,
-                                #                             tar_st.lookahead.curvature[0]])
-                                    
+                        for t in range(N-1-self.time_horizon):       
+                            if len(scenario_data.tar_states) == len(scenario_data.ego_states) and scenario_data.ego_states[t] is not None and scenario_data.tar_states[t] is not None:                     
+                                # define empty torch with proper size 
+                                dat = torch.zeros(self.time_horizon, self.input_dim)
                                 
-                            self.samples.append(dat)      
+                                for i in range(t,t+self.time_horizon):          
+                                    
+                                    ego_st = scenario_data.ego_states[i]
+                                    tar_st = scenario_data.tar_states[i]
+                                    if policy_gen:
+                                        scenario_data.tar_states[i+1] = policy_generator(tar_dynamics_simulator,scenario_data.tar_states[i])                  
+                                    # [(tar_s-ego_s), ego_ey, ego_epsi, ego_cur,
+                                    #                 tar_ey, tar_epsi, tar_cur]                                 
+                                    dat[i-t,:]=states_to_encoder_input_torch(tar_st, ego_st)
+                                    # torch.tensor([ tar_st.p.s - ego_st.p.s,
+                                    #                             ego_st.p.x_tran,
+                                    #                             ego_st.p.e_psi,
+                                    #                             ego_st.lookahead.curvature[0],                                                            
+                                    #                             tar_st.p.x_tran,
+                                    #                             tar_st.p.e_psi,
+                                    #                             tar_st.lookahead.curvature[0]])
+                                        
+                                    
+                                self.samples.append(dat)      
                             
                         
                     

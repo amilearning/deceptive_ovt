@@ -1,38 +1,50 @@
-import torch 
-import array
-import copy
-import sys
-import time
+import torch
 import gpytorch
-from typing import Type, List
-from tqdm import tqdm
-from matplotlib import pyplot as plt
-import numpy as np
-from torch.utils.data import DataLoader, Dataset
-import secrets
 from barcgp.prediction.abstract_gp_controller import GPController
+import array
+from tqdm import tqdm
+import numpy as np
 from barcgp.h2h_configs import *
 from barcgp.common.utils.file_utils import *
-from gpytorch.mlls import SumMarginalLogLikelihood
-from barcgp.prediction.gpytorch_models import ExactGPModel, MultitaskGPModel, MultitaskGPModelApproximate, \
-    IndependentMultitaskGPModelApproximate
-from barcgp.prediction.thetaGP.ThetaGPdataGen import SampleGeneartorThetaGP
-import os
-from barcgp.prediction.dyn_prediction_model import DynamicsModelForPredictor, TorchDynamicsModelForPredictor
+import torch.nn as nn
+from barcgp.prediction.dyn_prediction_model import TorchDynamicsModelForPredictor
 from barcgp.common.tracks.radius_arclength_track import RadiusArclengthTrack
+from barcgp.prediction.covGP.gp_nn_model import COVGPNNModel
+from torch.utils.data import DataLoader, random_split
+from typing import Type, List
+from barcgp.prediction.covGP.covGPNN_dataGen import SampleGeneartorCOVGP
+import sys
+from torch.nn import functional as F
+from torch.utils.tensorboard import SummaryWriter
 
-class ThetaGPApproximate(GPController):
-    def __init__(self, sample_generator: SampleGeneartorThetaGP, model_class: Type[gpytorch.models.GP],
-                 likelihood: gpytorch.likelihoods.Likelihood, input_size: int, output_size: int, inducing_points: int,
+class COVGPNN(GPController):
+    def __init__(self, args, sample_generator: SampleGeneartorCOVGP, model_class: Type[gpytorch.models.GP],
+                 likelihood: gpytorch.likelihoods.Likelihood,
                  enable_GPU=False):
+        if args is None:
+            self.args = {                    
+            "batch_size": 512,
+            "device": torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"),
+            "input_dim": 9,
+            "n_time_step": 10,
+            "latent_dim": 4,
+            "gp_output_dim": 3,
+            "batch_size": 100,
+            "inducing_points" : 300                
+            }
+        else: 
+            self.args = args
+        input_size = self.args["input_dim"]
+        output_size = self.args["gp_output_dim"]
+        inducing_points = self.args["inducing_points"]
         super().__init__(sample_generator, model_class, likelihood, input_size, output_size, enable_GPU)
-        self.model = IndependentMultitaskGPModelApproximate(inducing_points_num=inducing_points,
-                                                            input_dim=self.input_size,
-                                                            num_tasks=self.output_size)  # Independent
+        
+        self.model = COVGPNNModel(self.args).to(device='cuda')
         self.independent = True        
         self.train_loader = None
         self.valid_loader = None
         self.test_loader = None
+        
 
     def setup_dataloaders(self,train_dataload,valid_dataload, test_dataloader):
         self.train_loader = train_dataload
@@ -40,56 +52,9 @@ class ThetaGPApproximate(GPController):
         self.test_loader = test_dataloader
 
 
-    def pull_samples(self, holdout=20):        
-        
-        self.train_x = torch.zeros((self.sample_generator.getNumSamples() - holdout, self.input_size))  # [ego_state | tv_state]
-        self.test_x = torch.zeros((holdout, self.input_size))  # [ego_state | tv_state]
-        self.train_y = torch.zeros([self.sample_generator.getNumSamples() - holdout, self.output_size])  # [tv_actuation]
-        self.test_y = torch.zeros([holdout, self.output_size])  # [tv_actuation]
-
-        # Sampling should be done on CPU
-        self.train_x = self.train_x.cpu()
-        self.test_x = self.test_x.cpu()
-        self.train_y = self.train_y.cpu()
-        self.test_y = self.test_y.cpu()
-
-        not_done = True
-        sample_idx = 0
-        while not_done:            
-            samp = self.sample_generator.nextSample()
-            if samp is not None:                
-                samp_input, samp_output = samp
-                if sample_idx < holdout:
-                    self.test_x[sample_idx] = samp_input
-                    self.test_y[sample_idx] = samp_output
-                else:
-                    self.train_x[sample_idx - holdout] = samp_input
-                    self.train_y[sample_idx - holdout] = samp_output
-                sample_idx += 1
-            else:
-                print('Finished')
-                not_done = False        
-      
-        self.means_x = self.train_x.mean(dim=0, keepdim=True)
-        self.stds_x = self.train_x.std(dim=0, keepdim=True)
-        self.means_y = self.train_y.mean(dim=0, keepdim=True)
-        self.stds_y = self.train_y.std(dim=0, keepdim=True)
-        
-        self.normalize = True
-        if self.normalize:
-            for i in range(self.stds_x.shape[1]):
-                if self.stds_x[0, i] == 0:
-                    self.stds_x[0, i] = 1
-            self.train_x = (self.train_x - self.means_x) / self.stds_x
-            self.test_x = (self.test_x - self.means_x) / self.stds_x
-
-            for i in range(self.stds_y.shape[1]):
-                if self.stds_y[0, i] == 0:
-                    self.stds_y[0, i] = 1
-            self.train_y = (self.train_y - self.means_y) / self.stds_y
-            self.test_y = (self.test_y - self.means_y) / self.stds_y
-            print(f"train_x shape: {self.train_x.shape}")
-            print(f"train_y shape: {self.train_y.shape}")
+    def pull_samples(self, holdout=150):        
+        return 
+       
 
 
     def outputToReal(self, output):
@@ -101,119 +66,134 @@ class ThetaGPApproximate(GPController):
         else:
             return output
 
-    def train(self):
+    def train(self,sampGen: SampleGeneartorCOVGP):
+        
+        self.writer = SummaryWriter()
+
+        train_dataset, val_dataset, test_dataset  = sampGen.get_datasets()
+        batch_size = self.args["batch_size"]
+        train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        valid_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        
+        self.test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
         if self.enable_GPU:
             self.model = self.model.cuda()
             self.likelihood = self.likelihood.cuda()
-            self.train_x = self.train_x.cuda()
-            self.train_y = self.train_y.cuda()
-            self.test_x = self.test_x.cuda()
-            self.test_y = self.test_y.cuda()
+            # self.train_x = self.train_x.cuda()
+            # self.train_y = self.train_y.cuda()
+            # self.test_x = self.test_x.cuda()
+            # self.test_y = self.test_y.cuda()
 
         # Find optimal model hyper-parameters
         self.model.train()
         self.likelihood.train()
 
-        train_dataset = torch.utils.data.TensorDataset(
-            torch.tensor(self.train_x), torch.tensor(self.train_y)
-        )
-        valid_dataset = torch.utils.data.TensorDataset(
-            torch.tensor(self.test_x), torch.tensor(self.test_y)
-        )
-        train_dataloader = DataLoader(train_dataset,
-                                      batch_size=150 if self.enable_GPU else 100,
-                                      shuffle=True,  # shuffle?
-                                      num_workers=0 if self.enable_GPU else 8)
-        valid_dataloader = DataLoader(valid_dataset,
-                                      batch_size=25,
-                                      shuffle=False,  # shuffle?
-                                      num_workers=0 if self.enable_GPU else 8)
-
         # Use the Adam optimizer
-        optimizer = torch.optim.Adam([
-            {'params': self.model.parameters()},
-            {'params': self.likelihood.parameters()},
-        ], lr=0.055)  # Includes GaussianLikelihood parameters
+        reconloss_weight = 0.1
+        covloss_weight = 0.05
+        lr = 0.1            
+        optimizer = torch.optim.Adam([{'params': self.model.covnn.parameters(), 'lr': lr * 0.1},
+                                        {'params': self.model.gp_layer.hyperparameters(), 'lr': lr * 0.1},
+                                        {'params': self.model.gp_layer.variational_parameters()},
+                                        {'params': self.likelihood.parameters()},
+                                    ], lr=lr)
 
         # GP marginal log likelihood
         # p(y | x, X, Y) = ∫p(y|x, f)p(f|X, Y)df
-        mll = gpytorch.mlls.VariationalELBO(self.likelihood, self.model, num_data=self.train_y.numel())
-
-        epochs = 100
+        mll = gpytorch.mlls.VariationalELBO(self.likelihood, self.model.gp_layer, num_data=sampGen.getNumSamples())
+        mseloss = nn.MSELoss()
+        max_epochs = 500* len(train_dataloader)
         last_loss = np.inf
         no_progress_epoch = 0
-        not_done = True
+        done = False
         epoch = 0
         best_model = None
         best_likeli = None
         sys.setrecursionlimit(100000)
-        loop_count = 0
-        while not_done:
-            # loop_count +=1
-            # if loop_count > 1e3:
-            #     not_done = False
+        while not done:
         # for _ in range(epochs):
             train_dataloader = tqdm(train_dataloader)
             valid_dataloader = tqdm(valid_dataloader)
             train_loss = 0
             valid_loss = 0
             c_loss = 0
-            for step, (train_x, train_y) in enumerate(train_dataloader):
-                # Within each iteration, we will go over each minibatch of data
+            for step, (train_x, train_y) in enumerate(train_dataloader):               
                 optimizer.zero_grad()
-                output = self.model(train_x)
-                loss = -mll(output, train_y)
+                output, recons, input_covs, output_covs = self.model(train_x,train=True)
+                covloss = mseloss(input_covs, output_covs)* covloss_weight
+                reconloss = mseloss(recons,train_x)* reconloss_weight
+                variational_loss = -mll(output, train_y)
+                ######## prediction + reconstruction + covariance losses ###########
+                loss = variational_loss + reconloss  + covloss
+                ####################################################################
                 train_loss += loss.item()
-                train_dataloader.set_postfix(log={'train_loss': f'{(train_loss / (step + 1)):.5f}'})
+                train_dataloader.set_postfix(log={'train_loss': f'{(train_loss / (step + 1)):.5f}'})                
+                self.writer.add_scalar('Loss/recon_loss', reconloss.item(), epoch * len(train_dataloader) + step)
+                self.writer.add_scalar('Loss/variational_loss', variational_loss.item(), epoch * len(train_dataloader) + step)
+                self.writer.add_scalar('Loss/cov_loss', covloss.item(), epoch * len(train_dataloader) + step)
                 loss.backward()
                 optimizer.step()
+            self.writer.add_scalar('Loss/total_train_loss', train_loss, epoch)
             for step, (train_x, train_y) in enumerate(valid_dataloader):
                 optimizer.zero_grad()
                 output = self.model(train_x)
                 loss = -mll(output, train_y)
                 valid_loss += loss.item()
                 c_loss = valid_loss / (step + 1)
-                valid_dataloader.set_postfix(log={'valid_loss': f'{(c_loss):.5f}'})
+                valid_dataloader.set_postfix(log={'valid_loss': f'{(c_loss):.5f}'})                
+            self.writer.add_scalar('Loss/valid_loss', valid_loss, epoch)
             if c_loss > last_loss:
                 if no_progress_epoch >= 15:
-                    not_done = False
+                    done = True
             else:
                 best_model = copy.copy(self.model)
                 best_likeli = copy.copy(self.likelihood)
                 last_loss = c_loss
-                no_progress_epoch = 0
-
+                no_progress_epoch = 0            
             no_progress_epoch += 1
+            epoch +=1
+            if epoch > max_epochs:
+                done = True
+
         self.model = best_model
         self.likelihood = best_likeli
+        print("test done")
     
     def evaluate(self):       
-        self.set_evaluation_mode()
+        import matplotlib.pyplot as plt
+        self.set_evaluation_mode()        
         with torch.no_grad(), gpytorch.settings.fast_pred_var():
             # This contains predictions for both outcomes as a list
-            predictions = self.likelihood(self.likelihood(self.model(self.test_x[:50])))
+            # for step, (train_x, train_y) in enumerate(self.test_loader):                               
+            (self.test_x, self.test_y) = next(iter(self.test_loader))
+            predictions = self.likelihood(self.likelihood(self.model(self.test_x)))
 
         mean = predictions.mean.cpu()
         variance = predictions.variance.cpu()
-        self.means_x = self.means_x.cpu()
-        self.means_y = self.means_y.cpu()
-        self.stds_x = self.stds_x.cpu()
-        self.stds_y = self.stds_y.cpu()
+        std = predictions.stddev.cpu()
+        # self.means_x = self.means_x.cpu()
+        # self.means_y = self.means_y.cpu()
+        # self.stds_x = self.stds_x.cpu()
+        # self.stds_y = self.stds_y.cpu()
         self.test_y = self.test_y.cpu()
 
         f, ax = plt.subplots(self.output_size, 1, figsize=(15, 10))
-        titles = ['vlong', 'vlat', 'wz']
+        titles = ['xtran', 'epsi', 'vlong']
         for i in range(self.output_size):
-            unnormalized_mean = self.stds_y[0, i] * mean[:, i] + self.means_y[0, i]
-            unnormalized_mean = unnormalized_mean.detach().numpy()
-            cov = np.sqrt((variance[:, i] * (self.stds_y[0, i] ** 2)))
+            # unnormalized_mean = self.stds_y[0, i] * mean[:, i] + self.means_y[0, i]
+            # unnormalized_mean = unnormalized_mean.detach().numpy()
+            unnormalized_mean = mean[:,i].detach().numpy()
+            # cov = np.sqrt((variance[:, i] * (self.stds_y[0, i] ** 2)))
+            cov = std[:,i]
             cov = cov.detach().numpy()
             '''lower, upper = prediction.confidence_region()
             lower = lower.detach().numpy()
             upper = upper.detach().numpy()'''
             lower = unnormalized_mean - 2 * cov
             upper = unnormalized_mean + 2 * cov
-            tr_y = self.stds_y[0, i] * self.test_y[:50, i] + self.means_y[0, i]
+            # tr_y = self.stds_y[0, i] * self.test_y[:50, i] + self.means_y[0, i]
+            tr_y = self.test_y[:, i]
             # Plot training data as black stars
             ax[i].plot(tr_y, 'k*')
             # Predictive mean as blue line
@@ -228,8 +208,10 @@ class ThetaGPApproximate(GPController):
 
 
 
-class ThetaGPTrained(GPController):
-    def __init__(self, name, enable_GPU, model=None):
+
+
+class COVGPNNTrained(GPController):
+    def __init__(self, name, enable_GPU, model=None):        
         if model is not None:
             self.load_model_from_object(model)
         else:
@@ -250,35 +232,43 @@ class ThetaGPTrained(GPController):
             self.stds_x = self.stds_x.cpu()
             self.stds_y = self.stds_y.cpu()
         
-        self.dyn_model = DynamicsModelForPredictor() 
-############ has to match dim from sampleGeneratorInputGP
-        self.input_dim = 12 +4
+        
+        self.input_dim = 5 +4 ## 2 ## for state propogation
+        
         self.output_dim = 3   
+        # self.model.covar_module.base_kernel.lengthscale = self.model.covar_module.base_kernel.lengthscale * 1.0
+        # self.model.covar_module.outputscale = self.model.covar_module.outputscale * 1.0
        
     
        
 
-    def get_true_prediction_par(self,theta_encoder, encoder_input,  ego_state: VehicleState, target_state: VehicleState,
-                                ego_prediction: VehiclePrediction, track: RadiusArclengthTrack, M=3):
+    def get_true_prediction_par(self, input,  ego_state: VehicleState, target_state: VehicleState,
+                                ego_prediction: VehiclePrediction, track: RadiusArclengthTrack, M=10):
        
         
         # Set GP model to eval-mode
         self.set_evaluation_mode()
         # draw M samples
-        preds = self.sample_traj_gp_par(theta_encoder, encoder_input, ego_state, target_state, ego_prediction, track, M)
+        
+        preds = self.sample_traj_gp_par(input, ego_state, target_state, ego_prediction, track, M)
+        
         # numeric mean and covariance calculation.
+        # cov_start_time = time.time()
         pred = self.mean_and_cov_from_list(preds, M) 
+        # cov_end_time = time.time()
+        # cov_elapsed_time = cov_end_time - cov_start_time
+        # print(f"COV Elapsed time: {cov_elapsed_time} seconds")    
         pred.t = ego_state.t
 
         
 
         return pred
 
+    
 
-    def sample_traj_gp_par(self,theta_encoder, encoder_input,  ego_state: VehicleState, target_state: VehicleState,
+    def sample_traj_gp_par(self, encoder_input,  ego_state: VehicleState, target_state: VehicleState,
                            ego_prediction: VehiclePrediction, track: RadiusArclengthTrack, M):
 
-        
         prediction_samples = []
         for j in range(M):
             tmp_prediction = VehiclePrediction() 
@@ -303,7 +293,7 @@ class ThetaGPTrained(GPController):
         init_state = torch.hstack([init_tar_state,init_ego_state, init_tar_curv, init_ego_curv])
 
         roll_state = init_state.repeat(M,1).clone().to(device="cuda")        
-                
+        
         for j in range(M):                          # tar 0 1 2 3 4 5       #ego 6 7 8 9 10 11
             prediction_samples[j].s.append(roll_state[j,0].cpu().numpy())
             prediction_samples[j].x_tran.append(roll_state[j,1].cpu().numpy())                    
@@ -312,48 +302,67 @@ class ThetaGPTrained(GPController):
             prediction_samples[j].v_tran.append(roll_state[j,4].cpu().numpy())
             prediction_samples[j].psidot.append(roll_state[j,5].cpu().numpy())                 
 
-        roll_encoder_input = encoder_input.clone()
-        horizon = len(ego_prediction.x)       
-        for i in range(horizon-1):  
-        ##################################################################################
-        ################################## Theta prediction ##############################                  
-            # encoder_start_time = time.time()
-            if i ==0:
-                theta = theta_encoder.get_theta_from_buffer(roll_encoder_input)
-                batched_theta = theta.repeat(M,1).to(device="cuda") 
-            else:
-                if len(roll_encoder_input.shape) < 3:                    
-                    roll_encoder_input = roll_encoder_input.repeat(M,1,1)
-                roll_encoder_input = self.roll_encoder_input_given_rollstate(roll_encoder_input.clone(),roll_state)
-                batched_theta = theta_encoder.get_theta_from_buffer(roll_encoder_input).to(device="cuda")     
-            # encoder_end_time = time.time()
-            # encoder_elapsed_time = encoder_end_time - encoder_start_time
-            # print(f"Encoder Elapsed time: {encoder_elapsed_time} seconds")    
-        ####################
-            # batched_theta[:] =0                  
-        ################################## Theta prediction END ###########################     
 
+        horizon = len(ego_prediction.x)       
+        stacked_roll_state = roll_state.repeat(horizon,1).to(device="cuda")  
+        for i in range(horizon-1):  
+            
         ################################## Target input prediction ##############################          
+            # gp_start_time = time.time()
             tmp_state_for_input_prediction = torch.zeros(roll_state.shape[0],self.input_dim).to(device="cuda")
-            tmp_state_for_input_prediction[:,0] = roll_state[:,0]-roll_state[:,6]
-            tmp_state_for_input_prediction[:,1:6] = roll_state[:,1:6] # target dynamics (ey, epsi, vx, vy, wz)
-            tmp_state_for_input_prediction[:,6:9] = roll_state[:,7:10] # ego dynamics (ey, epsi, vx)            
-            tmp_state_for_input_prediction[:,9:12] = roll_state[:,12:15] # curvatures (tar_curvs(3))
-            tmp_state_for_input_prediction[:,12:] = batched_theta
+            ############## 
+            # roll_state  = [] 
+            # tmp_state_for_input_prediction[:,0] = roll_state[:,0]-roll_state[:,6]
+            # tmp_state_for_input_prediction[:,1:6] = roll_state[:,1:6] # target dynamics (ey, epsi, vx, vy, wz)
+            # tmp_state_for_input_prediction[:,6:9] = roll_state[:,7:10] # ego dynamics (ey, epsi, vx)            
+            # tmp_state_for_input_prediction[:,9:12] = roll_state[:,12:15] # curvatures (tar_curvs(3))
+            # tmp_state_for_input_prediction[:,12:] = batched_theta
+            
+            # gp_input = ey, epsi vx, cur0, cur2, theta 
+            
+
+            tmp_state_for_input_prediction[:,0:3] = roll_state[:,1:4]
+            tmp_state_for_input_prediction[:,3] = roll_state[:,12] 
+            tmp_state_for_input_prediction[:,4] = roll_state[:,13] 
+            if len(batched_theta.shape) >1:
+                tmp_state_for_input_prediction[:,5:] = batched_theta.expand(len(batched_theta),-1)
+            else:   
+                tmp_state_for_input_prediction[:,5] = batched_theta
+            #########################################
+            #########################################
+            # tmp_state_for_input_prediction[:,6] = torch.zeros(tmp_state_for_input_prediction[:,6].shape).to(device="cuda")
+            #########################################
+            #########################################
             with torch.no_grad(), gpytorch.settings.fast_pred_var():
+                
                 prediction = self.model(self.standardize(tmp_state_for_input_prediction))
+                # gp_output = torch.tensor([next_tar_st.p.x_tran-tar_st.p.x_tran, next_tar_st.p.e_psi-tar_st.p.e_psi, next_tar_st.v.v_long-tar_st.v.v_long])
                 mx = prediction.mean
                 std = prediction.stddev
-                noise = torch.randn_like(std).to(device="cuda")
-                tmp_target_pred = mx + noise * std     
-                predicted_target_vel_delta = self.outputToReal(tmp_target_pred)
-                predicted_target_vel = roll_state[:,3:6] + predicted_target_vel_delta
+                
+                # noise = torch.randn_like(std).to(device="cuda")
+                ## faster approach 
+                
+                noise = torch.cuda.FloatTensor(std.shape[0], std.shape[1]).normal_().to(device="cuda")
+                tmp_target_pred = mx + noise * std  
+                 
+                target_output_residual = self.outputToReal(tmp_target_pred)
+              
+                predicted_target_vel = roll_state[:,3:6] 
+                
+                
             
-            tmp_ego_input = torch.tensor([ego_prediction.u_a[i], ego_prediction.u_steer[i]])
-            
+            if ego_prediction.u_a is None:
+                tmp_ego_input = torch.tensor([0.0, 0.0]).to(device="cuda")    
+            else:
+                tmp_ego_input = torch.tensor([ego_prediction.u_a[i], ego_prediction.u_steer[i]]).to(device="cuda")
+            # gp_end_time = time.time()
+            # gp_elapsed_time = gp_end_time - gp_start_time
+            # print(f"GP Elapsed time: {gp_elapsed_time} seconds")  
         ################################## Target input prediction END ###########################        
         
         ################################## Vehicle Dynamics Update #################################
+            
             GP_Mean_dynamics_update= False
             if GP_Mean_dynamics_update:     
                 return   
@@ -370,12 +379,13 @@ class ThetaGPTrained(GPController):
                 # self.vehicleState_to_rollstate(tmp_tar_state,tmp_ego_state, predicted_target_input,tmp_ego_input, roll_state)                    
         ############### the distributed inputs are used to update the vehicle dynamics ###############
             else: ## the distributed inputs are used to update the vehicle dynamics 
-            ### Using a frenet-based paejeka tire dynamics 
-                vehicle_simulator = TorchDynamicsModelForPredictor(track)                
-                stacked_roll_state_for_dynamics_ego = self.roll_state_to_stack_tensor(roll_state)            
-                next_x_tar, next_cur_tar=  vehicle_simulator.kinematic_update(roll_state[:,0:3],predicted_target_vel)
-                next_x_ego, next_cur_ego = vehicle_simulator.dynamics_update(stacked_roll_state_for_dynamics_ego,tmp_ego_input.repeat(M,1).to(device="cuda"))
+            ### Using a frenet-based paejeka tire dynamics                
+                vehicle_simulator = TorchDynamicsModelForPredictor(track)                                   
+                next_x_ego, next_cur_ego=  vehicle_simulator.kinematic_update(roll_state[:,6:9],roll_state[:,9:12])               
+                next_x_tar, next_cur_tar=  vehicle_simulator.residual_state_update(roll_state[:,0:3],roll_state[:,3:6] , target_output_residual)
+               
                 roll_state = self.stack_tensor_to_roll_state(next_x_tar,next_x_ego,next_cur_tar,next_cur_ego)
+             
         ################################## Vehicle Dynamics Update END #################################
             for j in range(M):                                
                 prediction_samples[j].s.append(roll_state[j,0].cpu().numpy())
@@ -388,8 +398,8 @@ class ThetaGPTrained(GPController):
             # current_states: ego_s(0), ego_ey(1), ego_epsi(2), ego_vx(3), ego_vy(4), ego_wz(5), 
             #           tar_s(6), tar_ey(7), tar_epsi(8), tar_vx(9), tar_vy(10), tar_wz(11)
             # u(0) = ax_ego, u(1) = delta_ego   
-
-
+            
+            
         for i in range(M):
             prediction_samples[i].s = array.array('d', prediction_samples[i].s)
             prediction_samples[i].x_tran = array.array('d', prediction_samples[i].x_tran)
@@ -398,6 +408,8 @@ class ThetaGPTrained(GPController):
             prediction_samples[i].v_tran = array.array('d', prediction_samples[i].v_tran)
             prediction_samples[i].psidot = array.array('d', prediction_samples[i].psidot)            
 
+          
+        
         return prediction_samples
 
 
@@ -418,12 +430,19 @@ class ThetaGPTrained(GPController):
         # ego state
         roll_state[:,6:12] = next_x_ego
         # tar_curvs
-        roll_state[:,12] = next_cur_tar[0].squeeze()
-        roll_state[:,13] = next_cur_tar[1].squeeze()
-        roll_state[:,14] = next_cur_tar[2].squeeze()
-        roll_state[:,15] = next_cur_ego[0].squeeze()
-        roll_state[:,16] = next_cur_ego[1].squeeze()
-        roll_state[:,17] = next_cur_ego[2].squeeze()
+        roll_state[:,12] = next_cur_tar#.squeeze()
+        roll_state[:,13] = next_cur_tar#.squeeze()
+        roll_state[:,14] = next_cur_tar#.squeeze()
+        roll_state[:,15] = next_cur_ego#.squeeze()
+        roll_state[:,16] = next_cur_ego#.squeeze()
+        roll_state[:,17] = next_cur_ego#.squeeze()
+        
+        # roll_state[:,12] = next_cur_tar[0].squeeze()
+        # roll_state[:,13] = next_cur_tar[1].squeeze()
+        # roll_state[:,14] = next_cur_tar[2].squeeze()
+        # roll_state[:,15] = next_cur_ego[0].squeeze()
+        # roll_state[:,16] = next_cur_ego[1].squeeze()
+        # roll_state[:,17] = next_cur_ego[2].squeeze()
         return roll_state
 
     def rollstate_to_vehicleState(self,tar_state,ego_state,tar_input, ego_input,roll_state):

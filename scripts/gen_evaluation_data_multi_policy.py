@@ -22,7 +22,7 @@ from barcgp.prediction.trajectory_predictor import ConstantVelocityPredictor, Co
 from barcgp.common_control import run_pid_warmstart
 
 from barcgp.prediction.cont_encoder.cont_thetapolicy_predictor import ContThetaPolicyPredictor
-total_runs = 100
+total_runs = 1
 M = 50
 # target_policy_name = 'timid'
 # folder_name = 'timid'

@@ -4,80 +4,54 @@ from matplotlib import pyplot as plt
 import numpy as np
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
-from barcgp.prediction.cont_encoder.cont_encoderModel import ContLSTMAutomodel
+from barcgp.prediction.covGP.covGPNN_model import COVGPNN
+from barcgp.prediction.covGP.covGP_dataGen import SampleGeneartorCOVGP
 import secrets
 
 from barcgp.h2h_configs import *
 from barcgp.common.utils.file_utils import *
+import gpytorch
 
 writer = SummaryWriter(flush_secs=1)
 
-class MyDataset:
-    def __init__(self, data, labels, transform=None):
-        self.data = data
-        self.labels = labels
-        self.transform = transform
 
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        x = self.data[idx]
-        y = self.labels[idx]
-       
-        return x, y
-
-
-
-class ContPolicyEncoder:
-        def __init__(self,args = None,model_load = False, model_id = 100):
-            self.train_data = None           
+class COVNNLoader:
+        def __init__(self,args = None,model_load = False, model_id = 100):            
             self.model = None
             self.train_loader = None
             self.test_loader = None
             self.model_id = model_id                                
             
             if args is None:
-                self.train_args = {
+                self.train_args = {                    
                 "batch_size": 512,
-                "device": torch.device("cuda")
-                if torch.cuda.is_available()
-                else torch.device("cpu"),
-                "input_size": 9,
-                "hidden_size": 8,
-                "latent_size": 4,
-                "seq_len": 5,
-                "learning_rate": 0.0001,
-                "max_iter": 60000,
+                "device": torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"),
+                "input_dim": 9,
+                "n_time_step": 10,
+                "latent_dim": 4,
+                "gp_output_dim": 3,
+                "batch_size": 100                
                 }
             else: 
                 self.train_args = args      
             
-            self.input_dim = self.train_args["input_size"]
-            self.output_dim = self.train_args["latent_size"]
-            self.seq_len = self.train_args["seq_len"]
-            
-            if model_load:
-                self.model_load()
-                     
-        def reset_args(self,args):
-            self.train_args = args
-            self.input_dim = args["input_size"]
-            self.output_dim = args["latent_size"]
-            self.seq_len = args["seq_len"]
+            self.sampGen = None
 
-        
+            # if model_load:
+            #     self.model_load()
+        def reset_args(self,new_args):
+            self.train_args = new_args
+      
         def set_train_loader(self,data_loader):
             self.train_loader = data_loader
-
         def set_test_loader(self,data_loader):
-            self.test_loader = data_loader
-            
+            self.test_loader = data_loader            
 
         def model_save(self,model_id= None):
             if model_id is None:
                 model_id = self.model_id
-            save_dir = model_dir+f"cont_encoder_{model_id}.model" 
+            # save_dir = os.path.join(model_dir, 'cont_encoder_{model_id}.model')
+            save_dir = model_dir+"/"+f"covgpnn_{model_id}.model" 
             torch.save({
             'model_state_dict': self.model.state_dict(),
             'train_args': self.train_args
@@ -89,47 +63,46 @@ class ContPolicyEncoder:
         def model_load(self,model_id =None):
             if model_id is None:
                 model_id = self.model_id
-            saved_data = torch.load(model_dir+f"cont_encoder_{model_id}.model")            
+            saved_data = torch.load(model_dir+"/"+f"covgpnn_{model_id}.model")            
             loaded_args= saved_data['train_args']
             self.reset_args(loaded_args)
 
             model_state_dict = saved_data['model_state_dict']
-            self.model = ContLSTMAutomodel(self.train_args).to(device='cuda')                
+            self.model = COVGPNN(self.train_args).to(device='cuda')                
             self.model.to(torch.device("cuda"))
             self.model.load_state_dict(model_state_dict)
             self.model.eval()            
 
-        def get_theta(self,x,np = False):
-
-            z = self.model.get_latent_z(x)
-            ###  For TEsting only -> if InputPredictGP is working with the ground truth theta 
-            # z = torch.ones(z.shape).to(device="cuda")
-            ###
-            if torch.is_tensor(z) is False and np is False:                
-                z = torch.tensor(z)
-            elif torch.is_tensor(z) and np:        
-                z = z.cpu().numpy()        
+     
+        # def train(self,args = None):
+        def train(self,sampGen: SampleGeneartorCOVGP):
+            train_dataset, val_dataset, test_dataset  = sampGen.get_datasets()
+            batch_size = self.train_args["batch_size"]
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+            test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
             
-         
-            return z
-
-
-        def train(self,args = None):
             if self.train_loader is None:
                 return 
             if args is None:
                 args = self.train_args
             
             if self.model is None:     
-                model = ContLSTMAutomodel(args).to(device='cuda')                           
+                model = COVGPNN(args).to(device='cuda')                           
             else:
                 model = self.model.to(device='cuda')
-
-            optimizer = torch.optim.Adam(model.parameters(), lr=args['learning_rate'])
-
+            
+            likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks=sampGen.output_dim) 
+            lr = 0.1            
+            optimizer = torch.optim.Adam([{'params': model.covnn.parameters(), 'weight_decay': 1e-4},
+                                            {'params': model.gp_layer.hyperparameters(), 'lr': lr * 0.01},
+                                            {'params': model.gp_layer.variational_parameters()},
+                                            {'params': likelihood.parameters()},
+                                        ], lr=lr)
+            
+            mll = gpytorch.mlls.VariationalELBO(likelihood, model.gp_layer, num_data=len(self.train_loader.dataset))
             ## interation setup
             epochs = tqdm(range(args['max_iter'] // len(self.train_loader) + 1))
-
             ## training
             count = 0
             for epoch in epochs:
@@ -194,7 +167,7 @@ class ContPolicyEncoder:
                 
                 self.model = model
                 
-                if epoch%5000 == 0:
+                if epoch%500 == 0:
                     self.model_save(model_id=epoch)
 
         def get_theta_from_buffer(self,input_for_encoder):      

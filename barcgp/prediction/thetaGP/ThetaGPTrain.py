@@ -30,12 +30,12 @@ from barcgp.prediction.thetaGP.ThetaGPModel import ThetaGPApproximate
 # t_scenchicane_dir = os.path.join(t_policy_dir, 'chicane')
 
 # Training
-def thetagp_train(dirs):
+def thetagp_train(dirs,realdata = False):
     # dirs = [a_scencurve_dir, a_scenstraight_dir, a_scenchicane_dir, t_scencurve_dir, t_scenstraight_dir, t_scenchicane_dir]    
     # dirs = [a_scencurve_dir]    
     
     
-    sampGen = SampleGeneartorThetaGP(dirs, randomize=True)
+    sampGen = SampleGeneartorThetaGP(dirs, randomize=True, realdata = realdata)
     
     sampGen.plotStatistics()
     

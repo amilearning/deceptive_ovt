@@ -4,6 +4,7 @@ import pathlib
 
 gp_dir = os.path.expanduser('~') + '/barc_data/'
 train_dir = os.path.join(gp_dir, 'trainingData/')
+real_dir = os.path.join(gp_dir, 'realData/')
 eval_dir = os.path.join(gp_dir, 'evaluationData/')
 model_dir = os.path.join(train_dir, 'models/')
 param_dir = os.path.join(gp_dir, 'params/')

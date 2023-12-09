@@ -94,6 +94,12 @@ class ScenarioDefinition:
         self.length = self.track.track_length
         if self.track.phase_out:
             self.length = self.track.track_length - self.track.cl_segs[-1][0]
+@dataclass
+class RealData():
+    track: RadiusArclengthTrack
+    N: int
+    ego_states: List[VehicleState]
+    tar_states: List[VehicleState]
 
 
 @dataclass
@@ -298,7 +304,7 @@ class SampleGenerator():
     function to determine whether a sample is useful or not.
     '''
 
-    def __init__(self, abs_path, randomize=False, elect_function=None, init_all=True):
+    def __init__(self, abs_path, randomize=False, realdata = False, elect_function=None, init_all=True):
         '''
         abs path: List of absolute paths of directories containing files to be used for training
         randomize: boolean deciding whether samples should be returned in a random order or by time and file
@@ -312,39 +318,72 @@ class SampleGenerator():
         self.counter = 0
         self.abs_path = abs_path
         self.samples = []
+        dtar_s_check = []
+        
+        
         for ab_p in self.abs_path:
             for filename in os.listdir(ab_p):
                 if filename.endswith(".pkl"):
                     dbfile = open(os.path.join(ab_p, filename), 'rb')
-                    scenario_data: SimData = pickle.load(dbfile)
+                    print("dbfile name = " + str(dbfile))
+                    if realdata:
+                        scenario_data: RealData = pickle.load(dbfile)
+                    else:
+                        scenario_data: SimData = pickle.load(dbfile)
                     ######################## random Policy ############################
                     policy_name = ab_p.split('/')[-2]
                     policy_gen = False
                     if policy_name.__contains__('wall'):
                         policy_gen = True
-                        tar_dynamics_simulator = DynamicsSimulator(0, tar_dynamics_config, track=scenario_data.scenario_def.track)                    
-                    
+                        if realdata:
+                            tar_dynamics_simulator = DynamicsSimulator(0, tar_dynamics_config, track=scenario_data.track)                    
+                        else:
+                            tar_dynamics_simulator = DynamicsSimulator(0, tar_dynamics_config, track=scenario_data.scenario_def.track)                                        
                     ###################################################################
                     N = scenario_data.N
                     for i in range(N-1):
-                        if i%3 == 0 and scenario_data.tar_preds[i] is not None:
-                            ego_st = scenario_data.ego_states[i]
-                            tar_st = scenario_data.tar_states[i]
-                            if policy_gen:
-                                scenario_data.tar_states[i+1] = policy_generator(tar_dynamics_simulator,scenario_data.tar_states[i])                  
-                            ntar_st = scenario_data.tar_states[i + 1]
-                            dtar = tar_st.copy()
-                            dtar.p.s = ntar_st.p.s - tar_st.p.s
-                            dtar.p.x_tran = (ntar_st.p.x_tran - tar_st.p.x_tran)
-                            dtar.p.e_psi = ntar_st.p.e_psi - tar_st.p.e_psi
-                            dtar.v.v_long = ntar_st.v.v_long - tar_st.v.v_long
-                            dtar.w.w_psi = ntar_st.w.w_psi - tar_st.w.w_psi
-                            if elect_function(ego_st, tar_st):
-                                self.samples.append(Sample((ego_st, tar_st), dtar, tar_st.lookahead.curvature[0]))
+                        if realdata:                             
+                            if i%2 == 0:
+                                if len(scenario_data.tar_states) == len(scenario_data.ego_states) and scenario_data.ego_states[i] is not None and scenario_data.tar_states[i] is not None:
+                                    ego_st = scenario_data.ego_states[i]
+                                    tar_st = scenario_data.tar_states[i]
+                                    if policy_gen:
+                                        scenario_data.tar_states[i+1] = policy_generator(tar_dynamics_simulator,scenario_data.tar_states[i])                  
+                                    ntar_st = scenario_data.tar_states[i + 1]
+                                    dtar = tar_st.copy()
+                                    dtar.p.s = ntar_st.p.s - tar_st.p.s
+                                    dtar.p.x_tran = (ntar_st.p.x_tran - tar_st.p.x_tran)
+                                    dtar.p.e_psi = ntar_st.p.e_psi - tar_st.p.e_psi
+                                    dtar.v.v_long = ntar_st.v.v_long - tar_st.v.v_long
+                                    dtar.w.w_psi = ntar_st.w.w_psi - tar_st.w.w_psi
+                                
+                                    if elect_function(ego_st, tar_st) and abs(dtar.p.s) < 1.0:
+                                        self.samples.append(Sample((ego_st, tar_st), dtar, tar_st.lookahead.curvature[0]))
+                                        dtar_s_check.append(dtar.p.s)
+                        else:
+                            if i%3 == 0 and scenario_data.tar_preds[i] is not None:
+                                ego_st = scenario_data.ego_states[i]
+                                tar_st = scenario_data.tar_states[i]
+                                if policy_gen:
+                                    scenario_data.tar_states[i+1] = policy_generator(tar_dynamics_simulator,scenario_data.tar_states[i])                  
+                                ntar_st = scenario_data.tar_states[i + 1]
+                                dtar = tar_st.copy()
+                                dtar.p.s = ntar_st.p.s - tar_st.p.s
+                                dtar.p.x_tran = (ntar_st.p.x_tran - tar_st.p.x_tran)
+                                dtar.p.e_psi = ntar_st.p.e_psi - tar_st.p.e_psi
+                                dtar.v.v_long = ntar_st.v.v_long - tar_st.v.v_long
+                                dtar.w.w_psi = ntar_st.w.w_psi - tar_st.w.w_psi
+                                if elect_function(ego_st, tar_st):
+                                    self.samples.append(Sample((ego_st, tar_st), dtar, tar_st.lookahead.curvature[0]))
                     dbfile.close()
+                    
+                    
         print('Generated Dataset with', len(self.samples), 'samples!')
         if randomize:
             random.shuffle(self.samples)
+        plt.plot(np.array(dtar_s_check),'*')
+      
+        plt.show()
 
     
     

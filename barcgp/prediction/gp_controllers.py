@@ -239,7 +239,11 @@ class GPControllerApproximate(GPController):
         best_model = None
         best_likeli = None
         sys.setrecursionlimit(100000)
+        loop_count = 0
         while not_done:
+            # loop_count +=1
+            # if loop_count > 1e2:
+            #     not_done = False
         # for _ in range(epochs):
             train_dataloader = tqdm(train_dataloader)
             valid_dataloader = tqdm(valid_dataloader)
