@@ -13,9 +13,9 @@ from barcgp.simulation.dynamics_simulator import DynamicsSimulator
 from barcgp.h2h_configs import *
 from barcgp.common_control import run_pid_warmstart
 
-total_runs = 1000
+total_runs = 1
 
-target_policy_name = 'mild_300'
+target_policy_name = 'timid'
 
 policy_dir = os.path.join(train_dir, target_policy_name)
 track_types = ['straight','curve', 'chicane']

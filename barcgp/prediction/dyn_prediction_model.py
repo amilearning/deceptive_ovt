@@ -176,8 +176,7 @@ with torch.no_grad() and torch.cuda.amp.autocast():
             
             nx[:,0] = s + self.dt * ( (vx * torch.cos(epsi) - vy * torch.sin(epsi)) / (1 - curs * ey) )
             nx[:,1] = ey + delta_ey 
-            nx[:,2] = epsi + delta_epsi
-            
+            nx[:,2] = epsi + delta_epsi            
             nv[:,0] = vx+delta_vx
             # nv[:,1] = vx+delta_vy
 
@@ -190,11 +189,11 @@ with torch.no_grad() and torch.cuda.amp.autocast():
             
           
             
-            vehicle_full_dyn = torch.hstack([nx,nv]).to(device=self.torch_device)    
+            vehicle_kin = torch.hstack([nx,nv]).to(device=self.torch_device)    
           
             
            
-            return vehicle_full_dyn, next_curs
+            return vehicle_kin, next_curs
 
 
 

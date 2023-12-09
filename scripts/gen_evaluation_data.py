@@ -22,10 +22,12 @@ from barcgp.prediction.trajectory_predictor import ConstantVelocityPredictor, Co
 from barcgp.common_control import run_pid_warmstart
 
 from barcgp.prediction.cont_encoder.cont_thetapolicy_predictor import ContThetaPolicyPredictor
-total_runs = 100
+from barcgp.prediction.covGP.covGPNN_predictor import CovGPPredictor
+
+total_runs = 1
 M = 50
 target_policy_name = 'timid'
-folder_name = 'timid'
+folder_name = 'timid1209'
 tp_model_name = 'tphmcl' # this is not used 
 gp_model_name = 'gpberkely'
 track_types = ['straight','curve', 'chicane']
@@ -36,8 +38,8 @@ policy_dir = os.path.join(eval_dir, folder_name)
 predictors = [GPPredictor(N, None, gp_model_name, True, M, cov_factor=np.sqrt(2)),
                 # GPPredictor(N, None, gp_model_name, True, M, cov_factor=1),
                     # GPPredictor(N, None, gp_model_name, True, M, cov_factor=np.sqrt(0.5)),
-                    ContThetaPolicyPredictor(N, None, tp_model_name, True, M, cov_factor=np.sqrt(2)),                                
-                    # ContThetaPolicyPredictor(N, None, tp_model_name, True, M, cov_factor=np.sqrt(0.5)),            
+                    GPPredictor(N, None, gp_model_name, True, M, cov_factor=np.sqrt(2)),
+                    # CovGPPredictor(N, None, tp_model_name, True, M, cov_factor=np.sqrt(2)),                                                    
                 ConstantAngularVelocityPredictor(N, cov=.01),
                 # ConstantAngularVelocityPredictor(N, cov=.005),
                 # ConstantAngularVelocityPredictor(N, cov=.0),
@@ -70,13 +72,22 @@ def main(args=None):
     gp_params = []    
     params = []
     d = 0
+
+##############################################################################################
+    k=0
+    scen = scen_gen.genScenario()
+    predictors[k].track = scen.track
+    runSimulation(dt, t, N, names[k], predictors[k], scen, 0, 0)
+##############################################################################################
+
+    return 
     for i in range(total_runs):
         scen = scen_gen.genScenario()
         offset =  0 # np.random.uniform(0, 30)
         for k in range(len(names)):
             predictors[k].track = scen.track
 
-            if isinstance(predictors[k], GPPredictor) or  isinstance(predictors[k], ContThetaPolicyPredictor):
+            if isinstance(predictors[k], GPPredictor) or  isinstance(predictors[k], CovGPPredictor):
                 gp_params.append((dt, t, N, names[k], predictors[k], scen, i+d, offset))
             
             else:
@@ -108,7 +119,7 @@ def runSimulation(dt, t, N, name, predictor, scenario, id, offset=0):
     tv_history, ego_history, vehiclestate_history, ego_sim_state, tar_sim_state, egost_list, tarst_list = run_pid_warmstart(
         scenario, ego_dynamics_simulator, tar_dynamics_simulator, n_iter=n_iter, t=t, offset=offset)
 
-    if isinstance(predictor, GPPredictor) or isinstance(predictor, ContThetaPolicyPredictor):
+    if isinstance(predictor, GPPredictor) or isinstance(predictor, CovGPPredictor):
         mpcc_ego_controller = MPCC_H2H_approx(ego_dynamics_simulator.model, track_obj, gp_mpcc_ego_params, name="gp_mpcc_h2h_ego", track_name='track')
     else:
         mpcc_ego_controller = MPCC_H2H_approx(ego_dynamics_simulator.model, track_obj, mpcc_ego_params, name="mpcc_h2h_ego", track_name='track')
@@ -157,12 +168,13 @@ def runSimulation(dt, t, N, name, predictor, scenario, id, offset=0):
             # step forward
             tar_prediction = None if not mpcc_tv_controller.get_prediction() else mpcc_tv_controller.get_prediction().copy()
             tar_prediction.t = tar_sim_state.t
+            tar_prediction.xy_cov = np.repeat(np.diag([1, 1])[np.newaxis, :, :], 11, axis=0)
             tar_dynamics_simulator.step(tar_sim_state)
             track_obj.update_curvature(tar_sim_state)
 
             ego_prediction = None if not mpcc_ego_controller.get_prediction() else mpcc_ego_controller.get_prediction().copy()
             ego_prediction.t = ego_sim_state.t
-            # ego_prediction.xy_cov = np.repeat(np.diag([0.001, 0.001])[np.newaxis, :, :], 11, axis=0)
+            ego_prediction.xy_cov = np.repeat(np.diag([1, 1])[np.newaxis, :, :], 11, axis=0)
             ego_dynamics_simulator.step(ego_sim_state)
 
             # log states
@@ -175,17 +187,19 @@ def runSimulation(dt, t, N, name, predictor, scenario, id, offset=0):
 
     scenario_sim_data = EvalData(scenario, len(egost_list), egost_list, tarst_list, egopred_list, tarpred_list, gp_tarpred_list, tv_infeasible=tv_inf, ego_infeasible=ego_inf)
     
-    if isinstance(predictor, GPPredictor) or isinstance(predictor, ContThetaPolicyPredictor):
+    if isinstance(predictor, GPPredictor) or isinstance(predictor, CovGPPredictor):
         ego_config = gp_mpcc_ego_params
     else:
         ego_config = mpcc_ego_params
 
     multi_policy_sim_data = MultiPolicyEvalData(ego_config = ego_config, tar_config = mpcc_tv_params, evaldata = scenario_sim_data)
+    
+    smoothPlotResults(scenario_sim_data, speedup=1.6, close_loop=False)
     root_dir = os.path.join(policy_dir, scenario.track_type)
     create_dir(path=root_dir)
     root_dir = os.path.join(root_dir, name)
     create_dir(path=root_dir)
     pickle_write(multi_policy_sim_data, os.path.join(root_dir, str(id) + '.pkl'))
-
+    
 if __name__ == '__main__':
     main()

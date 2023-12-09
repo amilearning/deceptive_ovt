@@ -10,7 +10,8 @@ class Predictor(Enum):
     NMPC = 2
     DirectGP = 3
     AutoGP = 4 
-    ConstantInput = 5           
+    ConstantInput = 5      
+    COVGPNN = 6     
 
 class Controllers(Enum):
     NMPC = 0
@@ -44,16 +45,16 @@ tar_W = 0.173
 # Initial track conditions
 factor = 1.3  # v_long factor
 tarMin = VehicleState(t=0.0,
-                      p=ParametricPose(s=offset + 2.0, x_tran=-.3 * width, e_psi=-0.02),
+                      p=ParametricPose(s=offset + 1.0, x_tran=-.3 * width, e_psi=-0.02),
                       v=BodyLinearVelocity(v_long=0.8*factor))
 tarMax = VehicleState(t=0.0,
-                      p=ParametricPose(s=offset + 2.2, x_tran=.3* width, e_psi=0.02),
+                      p=ParametricPose(s=offset + 4.2, x_tran=.3* width, e_psi=0.02),
                       v=BodyLinearVelocity(v_long=1.0*factor))
 egoMin = VehicleState(t=0.0,
                       p=ParametricPose(s=offset + 0.2, x_tran=-.3 * width, e_psi=-0.02),
                       v=BodyLinearVelocity(v_long=0.5*factor))
 egoMax = VehicleState(t=0.0,
-                      p=ParametricPose(s=offset + 0.4, x_tran=.3 * width, e_psi=0.02),
+                      p=ParametricPose(s=offset + 2.2, x_tran=.3 * width, e_psi=0.02),
                       v=BodyLinearVelocity(v_long=1.0*factor))
 
 IKD_width = 1.0
@@ -158,13 +159,13 @@ mpcc_tv_params = MPCCApproxFullModelParams(
     l_cs=5,
     Q_cs=2.0,
     Q_vmax=200.0,
-    vlong_max_soft=0.9,
+    vlong_max_soft=1.2,
     Q_ts=500.0,
     Q_cs_e=8.0,
     l_cs_e=35.0,
 
     u_a_max=0.55,
-    vx_max=1.6,
+    vx_max=1.4,
     u_a_min=-1,
     u_steer_max=0.435,
     u_steer_min=-0.435,

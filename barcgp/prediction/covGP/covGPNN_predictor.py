@@ -22,7 +22,7 @@ class CovGPPredictor(BasePredictor):
             "input_dim": 9,
             "n_time_step": 10,
             "latent_dim": 4,
-            "gp_output_dim": 3,
+            "gp_output_dim": 4,
             "batch_size": 100,
             "inducing_points" : 300                
             }
@@ -67,7 +67,7 @@ class CovGPPredictor(BasePredictor):
 
         is_encoder_input_ready = self.append_vehicleState(ego_state,target_state)  
         if is_encoder_input_ready: ## encoder_is_ready = True            
-            pred = self.covgpnn_predict.get_true_prediction_par(self.encoder_input.clone(),  ego_state, target_state, ego_prediction, self.track, self.M)            
+            pred = self.covgpnn_predict.get_true_prediction_par(self.encoder_input,  ego_state, target_state, ego_prediction, self.track, self.M)            
         else:            
             pred = self.get_constant_vel_prediction_par(target_state) # self.gp.get_true_prediction_par(ego_state, target_state, ego_prediction, self.track, self.M)
         # fill in covariance transformation to x,y

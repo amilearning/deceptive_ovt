@@ -64,8 +64,6 @@ class CovSparseGP(gpytorch.models.ApproximateGP):
         super().__init__(variational_strategy)
 
 
-        lengthscale_prior = gpytorch.priors.LogNormalPrior(100.0, 100.0)
-        outputscale_prior = gpytorch.priors.LogNormalPrior(100.0, 100.0)
         # The mean and covariance modules should be marked as batch
         # so we learn a different set of hyperparameters
         self.mean_module = gpytorch.means.ConstantMean(batch_shape=torch.Size([num_tasks]))
@@ -187,10 +185,12 @@ class COVGPNNModel(gpytorch.Module):
     #                     ego_st.p.e_psi, 
     #                     ego_st.v.v_long                       
     #                     ])
+        s_diff = input_data[:,0,:]
         x_tran_diff = input_data[:,1,:]-input_data[:,6,:]
         e_psi_diff = input_data[:,2,:]-input_data[:,7,:]
         v_long_diff = input_data[:,3,:]-input_data[:,8,:]        
         input_corrcoefs = []
+        input_corrcoefs.append(torch.corrcoef(s_diff))
         input_corrcoefs.append(torch.corrcoef(x_tran_diff))
         input_corrcoefs.append(torch.corrcoef(e_psi_diff))
         input_corrcoefs.append(torch.corrcoef(v_long_diff))
@@ -224,7 +224,11 @@ class COVGPNNModel(gpytorch.Module):
         
         
         else:
-            pred = self.gp_layer(latent_x.squeeze())
+            if latent_x.shape[0] == 1:
+                latent_x = latent_x.reshape(1,-1) 
+            else:
+                latent_x = latent_x.squeeze() 
+            pred = self.gp_layer(latent_x)
             return pred
                 
 

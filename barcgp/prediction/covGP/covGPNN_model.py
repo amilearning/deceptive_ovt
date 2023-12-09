@@ -9,13 +9,15 @@ from barcgp.common.utils.file_utils import *
 import torch.nn as nn
 from barcgp.prediction.dyn_prediction_model import TorchDynamicsModelForPredictor
 from barcgp.common.tracks.radius_arclength_track import RadiusArclengthTrack
-from barcgp.prediction.covGP.gp_nn_model import COVGPNNModel
+from barcgp.prediction.covGP.covGPNN_gp_nn_model import COVGPNNModel
 from torch.utils.data import DataLoader, random_split
 from typing import Type, List
 from barcgp.prediction.covGP.covGPNN_dataGen import SampleGeneartorCOVGP
 import sys
 from torch.nn import functional as F
 from torch.utils.tensorboard import SummaryWriter
+from barcgp.prediction.torch_utils import get_curvature_from_keypts_torch
+
 
 class COVGPNN(GPController):
     def __init__(self, args, sample_generator: SampleGeneartorCOVGP, model_class: Type[gpytorch.models.GP],
@@ -28,7 +30,7 @@ class COVGPNN(GPController):
             "input_dim": 9,
             "n_time_step": 10,
             "latent_dim": 4,
-            "gp_output_dim": 3,
+            "gp_output_dim": 4,
             "batch_size": 100,
             "inducing_points" : 300                
             }
@@ -90,8 +92,8 @@ class COVGPNN(GPController):
         self.likelihood.train()
 
         # Use the Adam optimizer
-        reconloss_weight = 0.1
-        covloss_weight = 0.05
+        reconloss_weight = 0.01
+        covloss_weight = 0.01
         lr = 0.1            
         optimizer = torch.optim.Adam([{'params': self.model.covnn.parameters(), 'lr': lr * 0.1},
                                         {'params': self.model.gp_layer.hyperparameters(), 'lr': lr * 0.1},
@@ -206,7 +208,33 @@ class COVGPNN(GPController):
         plt.show()
 
 
+    def tsne_evaluate(self):            
+            if self.train_loader is None:
+                return 
+            args = self.train_args
+            
+            ## training
+            count = 0
+            train_iterator = tqdm(
+                    enumerate(self.train_loader), total=len(self.train_loader), desc="training"
+                )
+            model = self.model 
+            model.eval()
+            z_tmp_list = []
+            input_list = []
+            with torch.no_grad():
+                for i, batch_data in train_iterator:    
+                                
+                    count += 1
+                    train_data = batch_data.to(args['device'])                
+                    z_tmp = model.get_latent_z(train_data)
+                    if z_tmp.shape[0] == args['batch_size']:
+                        z_tmp_list.append(z_tmp)
+                        input_list.append(train_data)
+                stacked_z_tmp = torch.cat(z_tmp_list, dim=0)
+                input_list_tmp= torch.cat(input_list, dim=0)
 
+            return stacked_z_tmp, input_list_tmp
 
 
 
@@ -217,30 +245,33 @@ class COVGPNNTrained(GPController):
         else:
             self.load_model(name)
         self.enable_GPU = enable_GPU
+        
+        self.load_normalizing_consant()
         if self.enable_GPU:
             self.model = self.model.cuda()
             self.likelihood = self.likelihood.cuda()
-            self.means_x = self.means_x.cuda()
-            self.means_y = self.means_y.cuda()
-            self.stds_x = self.stds_x.cuda()
-            self.stds_y = self.stds_y.cuda()
+            # self.means_x = self.means_x.cuda()
+            # self.means_y = self.means_y.cuda()
+            # self.stds_x = self.stds_x.cuda()
+            # self.stds_y = self.stds_y.cuda()
         else:
             self.model.cpu()
             self.likelihood.cpu()
-            self.means_x = self.means_x.cpu()
-            self.means_y = self.means_y.cpu()
-            self.stds_x = self.stds_x.cpu()
-            self.stds_y = self.stds_y.cpu()
+            # self.means_x = self.means_x.cpu()
+            # self.means_y = self.means_y.cpu()
+            # self.stds_x = self.stds_x.cpu()
+            # self.stds_y = self.stds_y.cpu()
         
-        
-        self.input_dim = 5 +4 ## 2 ## for state propogation
-        
-        self.output_dim = 3   
-        # self.model.covar_module.base_kernel.lengthscale = self.model.covar_module.base_kernel.lengthscale * 1.0
-        # self.model.covar_module.outputscale = self.model.covar_module.outputscale * 1.0
-       
-    
-       
+    def load_normalizing_consant(self, name ='normalizing'):        
+        model = pickle_read(os.path.join(model_dir, name + '.pkl'))        
+        self.means_x = model['mean_sample']
+        self.means_y = model['std_sample']
+        self.stds_x = model['mean_sample']
+        self.stds_y = model['std_output']        
+        # self.independent = model['independent'] TODO uncomment        
+        print('Successfully loaded normalizing constants', name)
+
+
 
     def get_true_prediction_par(self, input,  ego_state: VehicleState, target_state: VehicleState,
                                 ego_prediction: VehiclePrediction, track: RadiusArclengthTrack, M=10):
@@ -264,163 +295,87 @@ class COVGPNNTrained(GPController):
 
         return pred
 
-    
+
+
+    def insert_to_end(self, roll_input, tar_state, tar_curv, ego_state):        
+        roll_input[:,:,:-1] = roll_input[:,:,1:]
+        input_tmp = torch.zeros(roll_input.shape[0],roll_input.shape[1]).to('cuda')        
+        input_tmp[:,0] = tar_state[:,0]-ego_state[:,0]                      
+        input_tmp[:,1] = tar_state[:,1]
+        input_tmp[:,2] = tar_state[:,2]
+        input_tmp[:,3] = tar_state[:,3]
+        input_tmp[:,4] = tar_curv[:,0]
+        input_tmp[:,5] = tar_curv[:,1]
+        input_tmp[:,6] = ego_state[:,1]
+        input_tmp[:,7] = ego_state[:,2] 
+        input_tmp[:,8] = ego_state[:,3]                                           
+        roll_input[:,:,-1] = input_tmp
+        return roll_input.clone()
 
     def sample_traj_gp_par(self, encoder_input,  ego_state: VehicleState, target_state: VehicleState,
                            ego_prediction: VehiclePrediction, track: RadiusArclengthTrack, M):
 
+        '''
+        encoder_input = batch x feature_dim x time_horizon
+        '''     
         prediction_samples = []
         for j in range(M):
             tmp_prediction = VehiclePrediction() 
-            tmp_prediction.s = []
-            tmp_prediction.x_tran = []
-            tmp_prediction.e_psi = []
-            tmp_prediction.v_long = []              
-            tmp_prediction.v_tran = []
-            tmp_prediction.psidot = []      
+            tmp_prediction.s = [target_state.p.s]
+            tmp_prediction.x_tran = [target_state.p.x_tran]
+            tmp_prediction.e_psi = [ target_state.p.e_psi]
+            tmp_prediction.v_long = [ target_state.v.v_long]                          
             prediction_samples.append(tmp_prediction)
-
-            
-            
-                
-        # roll state is ego and tar vehicle dynamics stacked into a big matrix 
-        init_tar_state = torch.tensor([target_state.p.s, target_state.p.x_tran, target_state.p.e_psi, target_state.v.v_long, target_state.v.v_tran, target_state.w.w_psi])
-        init_tar_curv = torch.tensor([target_state.lookahead.curvature[0], target_state.lookahead.curvature[1] , target_state.lookahead.curvature[2]])
-        init_ego_state = torch.tensor([ego_state.p.s, ego_state.p.x_tran, ego_state.p.e_psi, ego_state.v.v_long, ego_state.v.v_tran, ego_state.w.w_psi])
-        init_ego_curv = torch.tensor([ego_state.lookahead.curvature[0] ,ego_state.lookahead.curvature[1] ,ego_state.lookahead.curvature[2]])
+    
         
-        ## tar (6) + ego (6) + tar_curv(3) + ego_curv(3)
-        init_state = torch.hstack([init_tar_state,init_ego_state, init_tar_curv, init_ego_curv])
 
-        roll_state = init_state.repeat(M,1).clone().to(device="cuda")        
-        
-        for j in range(M):                          # tar 0 1 2 3 4 5       #ego 6 7 8 9 10 11
-            prediction_samples[j].s.append(roll_state[j,0].cpu().numpy())
-            prediction_samples[j].x_tran.append(roll_state[j,1].cpu().numpy())                    
-            prediction_samples[j].e_psi.append(roll_state[j,2].cpu().numpy())
-            prediction_samples[j].v_long.append(roll_state[j,3].cpu().numpy())
-            prediction_samples[j].v_tran.append(roll_state[j,4].cpu().numpy())
-            prediction_samples[j].psidot.append(roll_state[j,5].cpu().numpy())                 
+        roll_input = encoder_input.repeat(M,1,1).to('cuda') 
+        roll_tar_state = torch.tensor([target_state.p.s, target_state.p.x_tran, target_state.p.e_psi, target_state.v.v_long]).to('cuda')        
+        roll_tar_state = roll_tar_state.repeat(M,1)
+        roll_tar_curv = torch.tensor([target_state.lookahead.curvature[0], target_state.lookahead.curvature[2]]).to('cuda')        
+        roll_tar_curv = roll_tar_curv.repeat(M,1)
+        roll_ego_state = torch.tensor([ego_state.p.s, ego_state.p.x_tran, ego_state.p.e_psi, ego_state.v.v_long]).to('cuda')
+        roll_ego_state = roll_ego_state.repeat(M,1)
 
-
-        horizon = len(ego_prediction.x)       
-        stacked_roll_state = roll_state.repeat(horizon,1).to(device="cuda")  
-        for i in range(horizon-1):  
-            
-        ################################## Target input prediction ##############################          
-            # gp_start_time = time.time()
-            tmp_state_for_input_prediction = torch.zeros(roll_state.shape[0],self.input_dim).to(device="cuda")
-            ############## 
-            # roll_state  = [] 
-            # tmp_state_for_input_prediction[:,0] = roll_state[:,0]-roll_state[:,6]
-            # tmp_state_for_input_prediction[:,1:6] = roll_state[:,1:6] # target dynamics (ey, epsi, vx, vy, wz)
-            # tmp_state_for_input_prediction[:,6:9] = roll_state[:,7:10] # ego dynamics (ey, epsi, vx)            
-            # tmp_state_for_input_prediction[:,9:12] = roll_state[:,12:15] # curvatures (tar_curvs(3))
-            # tmp_state_for_input_prediction[:,12:] = batched_theta
-            
-            # gp_input = ey, epsi vx, cur0, cur2, theta 
-            
-
-            tmp_state_for_input_prediction[:,0:3] = roll_state[:,1:4]
-            tmp_state_for_input_prediction[:,3] = roll_state[:,12] 
-            tmp_state_for_input_prediction[:,4] = roll_state[:,13] 
-            if len(batched_theta.shape) >1:
-                tmp_state_for_input_prediction[:,5:] = batched_theta.expand(len(batched_theta),-1)
-            else:   
-                tmp_state_for_input_prediction[:,5] = batched_theta
-            #########################################
-            #########################################
-            # tmp_state_for_input_prediction[:,6] = torch.zeros(tmp_state_for_input_prediction[:,6].shape).to(device="cuda")
-            #########################################
-            #########################################
+        horizon = len(ego_prediction.x)               
+        for i in range(horizon-1):         
+            # gp_start_time = time.time()  
+            roll_input = self.insert_to_end(roll_input, roll_tar_state, roll_tar_curv, roll_ego_state)                      
             with torch.no_grad(), gpytorch.settings.fast_pred_var():
-                
-                prediction = self.model(self.standardize(tmp_state_for_input_prediction))
-                # gp_output = torch.tensor([next_tar_st.p.x_tran-tar_st.p.x_tran, next_tar_st.p.e_psi-tar_st.p.e_psi, next_tar_st.v.v_long-tar_st.v.v_long])
-                mx = prediction.mean
-                std = prediction.stddev
-                
-                # noise = torch.randn_like(std).to(device="cuda")
-                ## faster approach 
-                
-                noise = torch.cuda.FloatTensor(std.shape[0], std.shape[1]).normal_().to(device="cuda")
-                tmp_target_pred = mx + noise * std  
-                 
-                target_output_residual = self.outputToReal(tmp_target_pred)
-              
-                predicted_target_vel = roll_state[:,3:6] 
-                
-                
-            
-            if ego_prediction.u_a is None:
-                tmp_ego_input = torch.tensor([0.0, 0.0]).to(device="cuda")    
-            else:
-                tmp_ego_input = torch.tensor([ego_prediction.u_a[i], ego_prediction.u_steer[i]]).to(device="cuda")
-            # gp_end_time = time.time()
-            # gp_elapsed_time = gp_end_time - gp_start_time
-            # print(f"GP Elapsed time: {gp_elapsed_time} seconds")  
-        ################################## Target input prediction END ###########################        
+                pred_delta_dist = self.model(self.standardize(roll_input))
+                # pred_delta_dist = self.model(roll_input)            
+                mean = pred_delta_dist.mean
+                stddev = pred_delta_dist.stddev
+                tmp_delta = torch.distributions.Normal(mean, stddev).sample()                
+                pred_delta = self.outputToReal(tmp_delta)
+       
+            roll_tar_state[:,0] += pred_delta[:,0] 
+            roll_tar_state[:,1] += pred_delta[:,1] 
+            roll_tar_state[:,2] += pred_delta[:,2]
+            roll_tar_state[:,3] += pred_delta[:,3]  
+            roll_tar_curv[:,0] = get_curvature_from_keypts_torch(pred_delta[:,0].clone().detach(),track)
+            roll_tar_curv[:,1] = get_curvature_from_keypts_torch(pred_delta[:,0].clone().detach()+1.0,track)                        
+            roll_ego_state[:,0] = ego_prediction.s[i+1]
+            roll_ego_state[:,1] = ego_prediction.x_tran[i+1]
+            roll_ego_state[:,2] =  ego_prediction.e_psi[i+1]
+            roll_ego_state[:,3] =  ego_prediction.v_long[i+1]
+
+
+            for j in range(M):                          # tar 0 1 2 3 4 5       #ego 6 7 8 9 10 11
+                prediction_samples[j].s.append(roll_tar_state[j,0].cpu().numpy())
+                prediction_samples[j].x_tran.append(roll_tar_state[j,1].cpu().numpy())                    
+                prediction_samples[j].e_psi.append(roll_tar_state[j,2].cpu().numpy())
+                prediction_samples[j].v_long.append(roll_tar_state[j,3].cpu().numpy())
         
-        ################################## Vehicle Dynamics Update #################################
-            
-            GP_Mean_dynamics_update= False
-            if GP_Mean_dynamics_update:     
-                return   
-        ############### Using a Ground truth vehicle update ( only mean input prediction is used to update the model) ###############
-                # tmp_tar_state = target_state.copy()           
-                # tmp_ego_state = ego_state.copy()                           
-                # self.rollstate_to_vehicleState(tmp_tar_state,tmp_ego_state, predicted_target_input,tmp_ego_input, roll_state)                            
-                # track.update_curvature(tmp_tar_state)
-                # track.update_curvature(tmp_ego_state)   
-                # vehicle_dynamics.step(tmp_tar_state)
-                # vehicle_dynamics.step(tmp_ego_state)
-                # track.update_curvature(tmp_tar_state)
-                # track.update_curvature(tmp_ego_state)  
-                # self.vehicleState_to_rollstate(tmp_tar_state,tmp_ego_state, predicted_target_input,tmp_ego_input, roll_state)                    
-        ############### the distributed inputs are used to update the vehicle dynamics ###############
-            else: ## the distributed inputs are used to update the vehicle dynamics 
-            ### Using a frenet-based paejeka tire dynamics                
-                vehicle_simulator = TorchDynamicsModelForPredictor(track)                                   
-                next_x_ego, next_cur_ego=  vehicle_simulator.kinematic_update(roll_state[:,6:9],roll_state[:,9:12])               
-                next_x_tar, next_cur_tar=  vehicle_simulator.residual_state_update(roll_state[:,0:3],roll_state[:,3:6] , target_output_residual)
-               
-                roll_state = self.stack_tensor_to_roll_state(next_x_tar,next_x_ego,next_cur_tar,next_cur_ego)
-             
-        ################################## Vehicle Dynamics Update END #################################
-            for j in range(M):                                
-                prediction_samples[j].s.append(roll_state[j,0].cpu().numpy())
-                prediction_samples[j].x_tran.append(roll_state[j,1].cpu().numpy())                    
-                prediction_samples[j].e_psi.append(roll_state[j,2].cpu().numpy())
-                prediction_samples[j].v_long.append(roll_state[j,3].cpu().numpy())
-                prediction_samples[j].v_tran.append(roll_state[j,4].cpu().numpy())
-                prediction_samples[j].psidot.append(roll_state[j,5].cpu().numpy())
-        ################################## Vehicle Dynamics Update END##############################
-            # current_states: ego_s(0), ego_ey(1), ego_epsi(2), ego_vx(3), ego_vy(4), ego_wz(5), 
-            #           tar_s(6), tar_ey(7), tar_epsi(8), tar_vx(9), tar_vy(10), tar_wz(11)
-            # u(0) = ax_ego, u(1) = delta_ego   
-            
-            
         for i in range(M):
             prediction_samples[i].s = array.array('d', prediction_samples[i].s)
             prediction_samples[i].x_tran = array.array('d', prediction_samples[i].x_tran)
             prediction_samples[i].e_psi = array.array('d', prediction_samples[i].e_psi)
-            prediction_samples[i].v_long = array.array('d', prediction_samples[i].v_long)
-            prediction_samples[i].v_tran = array.array('d', prediction_samples[i].v_tran)
-            prediction_samples[i].psidot = array.array('d', prediction_samples[i].psidot)            
+            prediction_samples[i].v_long = array.array('d', prediction_samples[i].v_long)            
 
-          
         
         return prediction_samples
 
-
-
-    def roll_state_to_stack_tensor(self,roll_state):
-        stacked_roll_state_for_dynamics = torch.zeros(roll_state.shape[0],6).to(device="cuda")
-        # target state
-        # stacked_roll_state_for_dynamics[:roll_state.shape[0],:] = roll_state[:,0:6]        
-        # ego state
-        stacked_roll_state_for_dynamics = roll_state[:,6:12]        
-        return stacked_roll_state_for_dynamics
 
 
     def stack_tensor_to_roll_state(self,next_x_tar,next_x_ego,next_cur_tar,next_cur_ego):

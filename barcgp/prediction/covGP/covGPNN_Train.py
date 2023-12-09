@@ -21,18 +21,18 @@ a_policy_dir = os.path.join(train_dir, a_policy_name)
 a_scencurve_dir = os.path.join(a_policy_dir, 'curve')
 a_scenstraight_dir = os.path.join(a_policy_dir, 'straight')
 a_scenchicane_dir = os.path.join(a_policy_dir, 'chicane')
-sample_dir = os.path.join(a_policy_dir, 'sample')
 
-# t_policy_name = 'timid'
-# t_policy_dir = os.path.join(train_dir, t_policy_name)
-# t_scencurve_dir = os.path.join(t_policy_dir, 'curve')
-# t_scenstraight_dir = os.path.join(t_policy_dir, 'straight')
-# t_scenchicane_dir = os.path.join(t_policy_dir, 'chicane')
+
+t_policy_name = 'timid'
+t_policy_dir = os.path.join(train_dir, t_policy_name)
+t_scencurve_dir = os.path.join(t_policy_dir, 'curve')
+t_scenstraight_dir = os.path.join(t_policy_dir, 'straight')
+t_scenchicane_dir = os.path.join(t_policy_dir, 'chicane')
 
 # Training
 def covGPNN_train(dirs = None):
-    # dirs = [a_scencurve_dir, a_scenstraight_dir, a_scenchicane_dir, t_scencurve_dir, t_scenstraight_dir, t_scenchicane_dir]    
-    dirs = [sample_dir]    
+    dirs = [a_scencurve_dir, a_scenstraight_dir, a_scenchicane_dir, t_scencurve_dir, t_scenstraight_dir, t_scenchicane_dir]    
+    
     
     
     sampGen = SampleGeneartorCOVGP(dirs, randomize=True)
@@ -49,7 +49,7 @@ def covGPNN_train(dirs = None):
             "input_dim": 9,
             "n_time_step": 10,
             "latent_dim": 4,
-            "gp_output_dim": 3,
+            "gp_output_dim": 4,
             "batch_size": 100,
             "inducing_points" : 300                
             }
@@ -69,5 +69,5 @@ def covGPNN_train(dirs = None):
     # covgp_predictor.evaluate()
 
 
-if __name__ == "__main__":
-    covGPNN_train()
+# if __name__ == "__main__":
+#     covGPNN_train()

@@ -13,7 +13,7 @@ from barcgp.common.utils.scenario_utils import SimData, smoothPlotResults, Scena
 from barcgp.controllers.MPCC_H2H_approx import MPCC_H2H_approx
 from barcgp.simulation.dynamics_simulator import DynamicsSimulator
 from barcgp.h2h_configs import *
-from scripts.postprocess_data import derive_lateral_long_error_from_true_traj
+# from scripts.postprocess_data import derive_lateral_long_error_from_true_traj
 # All models are needed for pickle loading
 from barcgp.prediction.gpytorch_models import MultitaskGPModelApproximate, MultitaskGPModel, \
     IndependentMultitaskGPModelApproximate, ExactGPModel
@@ -21,19 +21,18 @@ from barcgp.prediction.gp_controllers import GPControllerTrained
 from barcgp.prediction.trajectory_predictor import ConstantVelocityPredictor, ConstantAngularVelocityPredictor, \
     GPPredictor, NLMPCPredictor
 
-from barcgp.prediction.inputpolicy_predictor import InputPolicyPredictor
-from barcgp.prediction.thetapolicy_predictor import ThetaPolicyPredictor
+from barcgp.prediction.covGP.covGPNN_predictor import CovGPPredictor
 from barcgp.common_control import run_pid_warmstart
 
 def main(args=None):
     ##############################################################################################################################################
     use_GPU = True   
     gen_scenario = True  # Controls whether to generate new scenario or use saved pkl
-    predictor_class = ThetaPolicyPredictor  # Either None or one of trajectory_predictor classes
+    predictor_class = NLMPCPredictor  # Either None or one of trajectory_predictor classes
     use_predictions_from_module = False  # Set to true to use predictions generated from `predictor_class`, otherwise use true predictions from MPCC
     # policy_name = "aggressive_blocking"
     target_policy_name = "aggressive_blocking"
-    gp_model_name = "aggressive_blocking"
+    gp_model_name = "gpberkely"
     M = 50  # Number of samples for GP
     T = 20  # Max number of seconds to run experiment
     t = 0  # Initial time increment
@@ -63,7 +62,7 @@ def main(args=None):
 
     mpcc_ego_controller = MPCC_H2H_approx(ego_dynamics_simulator.model, track_obj, mpcc_ego_params, name="mpcc_h2h_ego", track_name=track_name)
     mpcc_ego_controller.initialize()
-    if predictor_class.__name__ == "GPPredictor" or predictor_class.__name__ == "ThetaPolicyPredictor":
+    if predictor_class.__name__ == "GPPredictor" or predictor_class.__name__ == "CovGPPredictor":
         mpcc_ego_controller = gp_mpcc_ego_controller
 
     mpcc_ego_controller.set_warm_start(*ego_history)
@@ -80,8 +79,8 @@ def main(args=None):
         elif predictor_class.__name__ == "NLMPCPredictor":
             predictor = NLMPCPredictor(N=N, track=track_obj, cov=0.01, v_ref=mpcc_tv_params.vx_max)
             predictor.set_warm_start()
-        elif predictor_class.__name__ == "ThetaPolicyPredictor":
-            predictor = ThetaPolicyPredictor(N=N, track=track_obj, policy_name=gp_model_name, use_GPU=use_GPU, M=M, cov_factor=np.sqrt(2))            
+        elif predictor_class.__name__ == "CovGPPredictor":
+            predictor = CovGPPredictor(N=N, track=track_obj, policy_name=gp_model_name, use_GPU=use_GPU, M=M, cov_factor=np.sqrt(2))            
         else:
             predictor = predictor_class(N=N, track=track_obj, cov = 0.01)
 
@@ -140,6 +139,7 @@ def main(args=None):
 
     pickle_write(scenario_sim_data, os.path.join(gp_dir, 'testcurve.pkl'))
     smoothPlotResults(scenario_sim_data, speedup=1.6, close_loop=False)
+    return 
 
 ######################################## Trajector prediction error
     from matplotlib import pyplot as plt

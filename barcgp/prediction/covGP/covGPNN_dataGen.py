@@ -3,7 +3,7 @@ from barcgp.common.utils.scenario_utils import *
 from barcgp.simulation.dynamics_simulator import DynamicsSimulator
 from barcgp.h2h_configs import *    
 from barcgp.common.utils.scenario_utils import policy_generator
-
+from barcgp.common.utils.file_utils import *
 def states_to_encoder_input_torch(tar_st,ego_st):
     tar_s = tar_st.p.s
     ego_s = ego_st.p.s
@@ -29,6 +29,8 @@ def states_to_encoder_input_torch(tar_st,ego_st):
     return input_data
 
 
+
+
 class SampleGeneartorCOVGP(SampleGenerator):
     def __init__(self, abs_path, randomize=False, elect_function=None, init_all=True):
         '''
@@ -45,6 +47,8 @@ class SampleGeneartorCOVGP(SampleGenerator):
         #  tar_ey, tar_epsi, tar_cur,tar_accel, tar_delta] 
         #   x time_horizon
         #          
+        self.normalized_sample = None
+        self.normalized_output = None
         self.input_dim = 9
         self.time_horizon = 10
         
@@ -133,20 +137,45 @@ class SampleGeneartorCOVGP(SampleGenerator):
                                 #                                 tar_st.lookahead.curvature[0],                                                            
                                 #                                 tar_st.lookahead.curvature[2]]).to(torch.device("cuda"))  
                                 # del_state = self.get_residual_pose_using_kinematicmodel(tar_st,next_tar_st,dt=0.1)
-                                gp_output = torch.tensor([next_tar_st.p.x_tran-tar_st.p.x_tran, next_tar_st.p.e_psi-tar_st.p.e_psi, next_tar_st.v.v_long-tar_st.v.v_long])
-                                # gp_output = torch.tensor(del_state)
-                                
+                                delta_s = next_tar_st.p.s-tar_st.p.s
+                                delta_xtran = next_tar_st.p.x_tran-tar_st.p.x_tran
+                                delta_epsi = next_tar_st.p.e_psi-tar_st.p.e_psi
+                                delta_vlong  = next_tar_st.v.v_long-tar_st.v.v_long
+                                gp_output = torch.tensor([delta_s, delta_xtran, delta_epsi, delta_vlong ])                                
+                                # gp_output = torch.tensor(del_state)                                
                                 self.samples.append(dat.clone())  
                                 self.output_data.append(gp_output.clone())    
                             
                         
                     
                     dbfile.close()
-                
+        self.input_output_normalizing()
         print('Generated Dataset with', len(self.samples), 'samples!')
         
         # if randomize:
         #     random.shuffle(self.samples)
+    
+  
+    def normalize(self,data):
+        mean = torch.mean(data,dim=0)
+        std = torch.std(data,dim=0)        
+        new_data = (data - mean.repeat(data.shape[0],1,1))/std         
+        return new_data, mean, std
+
+    def input_output_normalizing(self,name = 'normalizing'):
+        tensor_sample = torch.stack(self.samples)
+        tensor_output = torch.stack(self.output_data)
+        self.normalized_sample, mean_sample, std_sample= self.normalize(tensor_sample)
+        self.normalized_output, mean_output, std_output = self.normalize(tensor_output)        
+
+        model_to_save = dict()
+        model_to_save['mean_sample'] = mean_sample
+        model_to_save['std_sample'] = std_sample
+        model_to_save['mean_sample'] = mean_output
+        model_to_save['std_output'] = std_output
+        pickle_write(model_to_save, os.path.join(model_dir, name + '.pkl'))
+        print('Successfully saved normalizing constnats', name)
+        
     
     def get_residual_pose_using_kinematicmodel(self,state,nstate, dt = 0.1):
         kinmatic_nstate = state.copy()
@@ -200,8 +229,14 @@ class SampleGeneartorCOVGP(SampleGenerator):
         #     samples = [item for item in self.samples if sum((0.5 > item[:, 0]) & (item[:, 0] > 0.0)) > 2]
         #     samp_len = len(samples)
         # else:
-        inputs= torch.stack(self.samples).to(torch.device("cuda"))  
-        labels = torch.stack(self.output_data).to(torch.device("cuda"))
+        
+
+        if self.normalized_output is None:
+            inputs= torch.stack(self.samples).to(torch.device("cuda"))  
+            labels = torch.stack(self.output_data).to(torch.device("cuda"))
+        else:
+            inputs = self.normalized_sample.to(torch.device("cuda"))  
+            labels = self.normalized_output.to(torch.device("cuda"))  
         # self.means_y = labels.mean(dim=0, keepdim=True)
         # self.stds_y = labels.std(dim=0, keepdim=True)
         # labels = (labels - self.means_y) / self.stds_y
