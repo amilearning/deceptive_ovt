@@ -68,12 +68,16 @@ class CovGPPredictor(BasePredictor):
         is_encoder_input_ready = self.append_vehicleState(ego_state,target_state)  
         if is_encoder_input_ready: ## encoder_is_ready = True            
             pred = self.covgpnn_predict.get_true_prediction_par(self.encoder_input,  ego_state, target_state, ego_prediction, self.track, self.M)            
+            pred.track_cov_to_local(self.track, self.N, self.cov_factor)  
         else:            
-            pred = self.get_constant_vel_prediction_par(target_state) # self.gp.get_true_prediction_par(ego_state, target_state, ego_prediction, self.track, self.M)
+            pred = None # self.get_constant_vel_prediction_par(target_state) # self.gp.get_true_prediction_par(ego_state, target_state, ego_prediction, self.track, self.M)
         # fill in covariance transformation to x,y
-        pred.track_cov_to_local(self.track, self.N, self.cov_factor)        
+              
         # pred.convert_local_to_global_cov()
         return pred
+
+
+
 
 
 

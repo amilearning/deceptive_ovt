@@ -13,11 +13,11 @@ from barcgp.simulation.dynamics_simulator import DynamicsSimulator
 from barcgp.h2h_configs import *
 from barcgp.common_control import run_pid_warmstart
 
-total_runs = 100
+total_runs = 1000
 
-target_policy_name = 'aggressive_blocking'
-folder_name = 'timid_0'
-policy_dir = os.path.join(train_dir, 'test_ws')
+target_policy_name = 'mild_5000'
+folder_name = 'mild_5000_0'
+# policy_dir = os.path.join(train_dir, 'test_ws')
 track_types = ['straight','curve', 'chicane']
 T = 20
 
@@ -34,8 +34,9 @@ def main(args=None):
     process_pool = mp.Pool(processes=8)
     params = []
     ####################
-    # runSimulation(dt, t, N, scen_gen.genScenario(), 0)
-    # return
+    if total_runs ==1:
+        runSimulation(dt, t, N, scen_gen.genScenario(), 0)
+        return
     ####################
     for i in range(total_runs):
         params.append((dt, t, N, scen_gen.genScenario(), i))
@@ -72,7 +73,7 @@ def runSimulation(dt, t, N, scenario, id):
     while ego_sim_state.t < T and not done:
         if ego_sim_state.v.v_long < 0 or tar_sim_state.v.v_long < 0:
             break 
-        if tar_sim_state.p.s >= 0.8 * scenario.length or ego_sim_state.p.s >= 0.8 * scenario.length or abs(ego_sim_state.p.x_tran) > track_obj.track_width/2.0:
+        if tar_sim_state.p.s >= 0.9 * scenario.length or ego_sim_state.p.s >= 0.9* scenario.length or abs(ego_sim_state.p.x_tran) > track_obj.track_width/2.0+0.25:
             break
         else:
             # update control inputs
@@ -118,7 +119,8 @@ def runSimulation(dt, t, N, scenario, id):
     root_dir = os.path.join(policy_dir, scenario.track_type)
     create_dir(path=root_dir)
     pickle_write(scenario_sim_data, os.path.join(root_dir, str(id) + '.pkl'))
-    # smoothPlotResults(scenario_sim_data, speedup=1.6, close_loop=False)
+    if total_runs == 1:
+        smoothPlotResults(scenario_sim_data, speedup=1.6, close_loop=False)
 
 if __name__ == '__main__':
     main()

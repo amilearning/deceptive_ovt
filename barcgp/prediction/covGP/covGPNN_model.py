@@ -17,6 +17,8 @@ import sys
 from torch.nn import functional as F
 from torch.utils.tensorboard import SummaryWriter
 from barcgp.prediction.torch_utils import get_curvature_from_keypts_torch
+import time
+import torch.optim.lr_scheduler as lr_scheduler
 
 
 class COVGPNN(GPController):
@@ -92,14 +94,24 @@ class COVGPNN(GPController):
         self.likelihood.train()
 
         # Use the Adam optimizer
-        reconloss_weight = 0.01
-        covloss_weight = 0.01
-        lr = 0.1            
-        optimizer = torch.optim.Adam([{'params': self.model.covnn.parameters(), 'lr': lr * 0.1},
-                                        {'params': self.model.gp_layer.hyperparameters(), 'lr': lr * 0.1},
+
+                  
+
+
+
+        optimizer = torch.optim.Adam([{'params': self.model.covnn.parameters()}],lr = 0.01)
+        lr_gp = 0.005
+        optimizer_gp = torch.optim.Adam([{'params': self.model.covnn.parameters(), 'lr': 0.01},
+                                        {'params': self.model.gp_layer.hyperparameters(), 'lr': 0.005},
                                         {'params': self.model.gp_layer.variational_parameters()},
                                         {'params': self.likelihood.parameters()},
-                                    ], lr=lr)
+                                    ], lr=lr_gp)
+        # optimizer_gp = torch.optim.Adam([{'params': self.model.gp_layer.hyperparameters(), 'lr': 0.001},
+        #                                 {'params': self.model.gp_layer.variational_parameters()},
+        #                                 {'params': self.likelihood.parameters()},
+        #                             ], lr=lr_gp)
+        scheduler = lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.9)
+        scheduler_gp = lr_scheduler.StepLR(optimizer_gp, step_size=5, gamma=0.9)
 
         # GP marginal log likelihood
         # p(y | x, X, Y) = ∫p(y|x, f)p(f|X, Y)df
@@ -113,6 +125,7 @@ class COVGPNN(GPController):
         best_model = None
         best_likeli = None
         sys.setrecursionlimit(100000)
+        train_nn = True
         while not done:
         # for _ in range(epochs):
             train_dataloader = tqdm(train_dataloader)
@@ -120,22 +133,71 @@ class COVGPNN(GPController):
             train_loss = 0
             valid_loss = 0
             c_loss = 0
-            for step, (train_x, train_y) in enumerate(train_dataloader):               
-                optimizer.zero_grad()
-                output, recons, input_covs, output_covs = self.model(train_x,train=True)
-                covloss = mseloss(input_covs, output_covs)* covloss_weight
-                reconloss = mseloss(recons,train_x)* reconloss_weight
-                variational_loss = -mll(output, train_y)
-                ######## prediction + reconstruction + covariance losses ###########
-                loss = variational_loss + reconloss  + covloss
-                ####################################################################
-                train_loss += loss.item()
-                train_dataloader.set_postfix(log={'train_loss': f'{(train_loss / (step + 1)):.5f}'})                
-                self.writer.add_scalar('Loss/recon_loss', reconloss.item(), epoch * len(train_dataloader) + step)
-                self.writer.add_scalar('Loss/variational_loss', variational_loss.item(), epoch * len(train_dataloader) + step)
-                self.writer.add_scalar('Loss/cov_loss', covloss.item(), epoch * len(train_dataloader) + step)
-                loss.backward()
-                optimizer.step()
+            for step, (train_x, train_y) in enumerate(train_dataloader):    
+                if train_nn:           
+                    optimizer.zero_grad()
+                    optimizer_gp.zero_grad()
+                    output, recons, input_covs, output_covs = self.model(train_x,train=True)
+                    reconloss_weight = 1.0
+                    covloss_weight = 0.01
+                    # varational_weight = 0.001
+                    covloss = mseloss(input_covs, output_covs)* covloss_weight
+                    reconloss = mseloss(recons,train_x)* reconloss_weight
+                    # variational_loss = -mll(output, train_y)*varational_weight
+                    ######## prediction + reconstruction + covariance losses ###########
+                    loss = reconloss  + covloss
+                    ####################################################################
+                    train_loss += loss.item()
+                    # train_dataloader.set_postfix(log={'train_loss': f'{(train_loss / (step + 1)):.5f}'})                
+                    self.writer.add_scalar('Loss/recon_loss', reconloss.item(), epoch * len(train_dataloader) + step)
+                    # self.writer.add_scalar('Loss/variational_loss', variational_loss.item(), epoch * len(train_dataloader) + step)
+                    self.writer.add_scalar('Loss/cov_loss', covloss.item(), epoch * len(train_dataloader) + step)
+                    for name, param in self.model.covnn.named_parameters():
+                        self.writer.add_histogram(f'Weights/{name}', param.data.cpu().numpy(), epoch)
+                        if param.grad is not None:
+                            self.writer.add_histogram(f'Gradients/{name}', param.grad.data.cpu().numpy(), epoch)
+
+                    loss.backward()
+                    optimizer.step()
+                else:
+                    optimizer_gp.zero_grad()
+                    optimizer.zero_grad()
+                    output, recons, input_covs, output_covs = self.model(train_x,train=True)
+                    reconloss_weight = 0.01
+                    covloss_weight = 0.01
+                    varational_weight = 1.0
+                    covloss = mseloss(input_covs, output_covs)* covloss_weight
+                    reconloss = mseloss(recons,train_x)* reconloss_weight
+                    variational_loss = -mll(output, train_y)*varational_weight
+                    ######## prediction + reconstruction + covariance losses ###########
+                    loss = variational_loss #+covloss +reconloss
+                    ####################################################################
+                    train_loss += loss.item()
+                    # train_dataloader.set_postfix(log={'train_loss': f'{(train_loss / (step + 1)):.5f}'})                
+                    self.writer.add_scalar('Loss/recon_loss', reconloss.item(), epoch * len(train_dataloader) + step)
+                    self.writer.add_scalar('Loss/variational_loss', variational_loss.item(), epoch * len(train_dataloader) + step)
+                    self.writer.add_scalar('Loss/cov_loss', covloss.item(), epoch * len(train_dataloader) + step)
+                    loss.backward()
+                    optimizer_gp.step()
+            
+            # train_nn = not train_nn
+            scheduler.step()
+            scheduler_gp.step()
+            if epoch % 5 ==0:
+                if train_nn:
+                    snapshot_name = 'covGPNNOnly' + str(epoch)+ 'snapshot'
+                    self.set_evaluation_mode()
+                    self.save_model(snapshot_name)
+                    self.model.train()
+                    self.likelihood.train()
+                else:   
+                    snapshot_name = 'covGP_' + str(epoch)+ 'snapshot'
+                    self.set_evaluation_mode()
+                    self.save_model(snapshot_name)
+                    self.model.train()
+                    self.likelihood.train()
+         
+            
             self.writer.add_scalar('Loss/total_train_loss', train_loss, epoch)
             for step, (train_x, train_y) in enumerate(valid_dataloader):
                 optimizer.zero_grad()
@@ -146,8 +208,9 @@ class COVGPNN(GPController):
                 valid_dataloader.set_postfix(log={'valid_loss': f'{(c_loss):.5f}'})                
             self.writer.add_scalar('Loss/valid_loss', valid_loss, epoch)
             if c_loss > last_loss:
-                if no_progress_epoch >= 15:
-                    done = True
+                if no_progress_epoch >= 10:
+                    if train_nn is False:
+                        done = True
             else:
                 best_model = copy.copy(self.model)
                 best_likeli = copy.copy(self.likelihood)
@@ -264,10 +327,10 @@ class COVGPNNTrained(GPController):
         
     def load_normalizing_consant(self, name ='normalizing'):        
         model = pickle_read(os.path.join(model_dir, name + '.pkl'))        
-        self.means_x = model['mean_sample']
-        self.means_y = model['std_sample']
-        self.stds_x = model['mean_sample']
-        self.stds_y = model['std_output']        
+        self.means_x = model['mean_sample'].cuda()
+        self.means_y = model['mean_output'].cuda()
+        self.stds_x = model['std_sample'].cuda()
+        self.stds_y = model['std_output'].cuda()        
         # self.independent = model['independent'] TODO uncomment        
         print('Successfully loaded normalizing constants', name)
 
@@ -312,6 +375,25 @@ class COVGPNNTrained(GPController):
         roll_input[:,:,-1] = input_tmp
         return roll_input.clone()
 
+    
+    def get_pose_using_kinematicmodel(self,roll_tar_state : torch.tensor, dt = 0.1):
+        # roll_tar_state = M x torch.tensor([target_state.p.s, target_state.p.x_tran, target_state.p.e_psi, target_state.v.v_long]).to('cuda')        
+        kinmatic_nstate = roll_tar_state.clone()
+        s = kinmatic_nstate[:,0]
+         
+        vy =state.v.v_tran
+        curs = state.lookahead.curvature[0]
+        ey = state.p.x_tran
+        epsi = state.p.e_psi
+        wz = state.w.w_psi
+        kinmatic_nstate.p.s = state.p.s + dt * ( (vx * np.cos(epsi) - vy * np.sin(epsi)) / (1 - curs * ey) )
+        kinmatic_nstate.p.x_tran = state.p.x_tran + dt * (vx * np.sin(epsi) + vy * np.cos(epsi))
+        kinmatic_nstate.p.e_psi = state.p.e_psi + dt * ( wz - (vx * np.cos(epsi) - vy * np.sin(epsi)) / (1 - curs * ey) * curs )
+        
+        return kinmatic_nstate
+
+
+    
     def sample_traj_gp_par(self, encoder_input,  ego_state: VehicleState, target_state: VehicleState,
                            ego_prediction: VehiclePrediction, track: RadiusArclengthTrack, M):
 
@@ -337,7 +419,8 @@ class COVGPNNTrained(GPController):
         roll_ego_state = torch.tensor([ego_state.p.s, ego_state.p.x_tran, ego_state.p.e_psi, ego_state.v.v_long]).to('cuda')
         roll_ego_state = roll_ego_state.repeat(M,1)
 
-        horizon = len(ego_prediction.x)               
+        horizon = len(ego_prediction.x)    
+        # start_time = time.time()
         for i in range(horizon-1):         
             # gp_start_time = time.time()  
             roll_input = self.insert_to_end(roll_input, roll_tar_state, roll_tar_curv, roll_ego_state)                      
@@ -354,7 +437,7 @@ class COVGPNNTrained(GPController):
             roll_tar_state[:,2] += pred_delta[:,2]
             roll_tar_state[:,3] += pred_delta[:,3]  
             roll_tar_curv[:,0] = get_curvature_from_keypts_torch(pred_delta[:,0].clone().detach(),track)
-            roll_tar_curv[:,1] = get_curvature_from_keypts_torch(pred_delta[:,0].clone().detach()+1.0,track)                        
+            roll_tar_curv[:,1] = get_curvature_from_keypts_torch(pred_delta[:,0].clone().detach()+target_state.lookahead.dl*2,track)                        
             roll_ego_state[:,0] = ego_prediction.s[i+1]
             roll_ego_state[:,1] = ego_prediction.x_tran[i+1]
             roll_ego_state[:,2] =  ego_prediction.e_psi[i+1]
@@ -367,6 +450,10 @@ class COVGPNNTrained(GPController):
                 prediction_samples[j].e_psi.append(roll_tar_state[j,2].cpu().numpy())
                 prediction_samples[j].v_long.append(roll_tar_state[j,3].cpu().numpy())
         
+        # end_time = time.time()
+        # elapsed_time = end_time - start_time
+        # print(f"Time taken for GP(over horizons) call: {elapsed_time} seconds")
+
         for i in range(M):
             prediction_samples[i].s = array.array('d', prediction_samples[i].s)
             prediction_samples[i].x_tran = array.array('d', prediction_samples[i].x_tran)

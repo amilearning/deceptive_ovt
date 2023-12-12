@@ -381,9 +381,9 @@ class SampleGenerator():
         print('Generated Dataset with', len(self.samples), 'samples!')
         if randomize:
             random.shuffle(self.samples)
-        plt.plot(np.array(dtar_s_check),'*')
+        # plt.plot(np.array(dtar_s_check),'*')
       
-        plt.show()
+        # plt.show()
 
     
     

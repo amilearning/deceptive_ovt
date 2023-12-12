@@ -13,26 +13,19 @@ def get_dir(policy_name_, train_dir_):
     dirs = [scencurve_dir, scenstraight_dir, scenchicane_dir]
     return dirs
 
-
+test_0 = get_dir('test_data', train_dir)
 
 timid_0 = get_dir('timid_0', train_dir)
-m500 = get_dir('aggressive_blocking', train_dir)
-m100 = get_dir('mild_100', train_dir)
-m200 = get_dir('mild_200', train_dir)
-m300 = get_dir('mild_300', train_dir)
-m1000 = get_dir('mild_1000', train_dir)
-m5000 = get_dir('mild_5000', train_dir)
-reverse = get_dir('reverse', train_dir)
-timid = get_dir('timid', train_dir)
-wall_timid  = get_dir('wall_timid',train_dir)
-wall_200  = get_dir('wall_200',train_dir)
-wall_500  = get_dir('wall_aggressive_blocking',train_dir)
-wall_5000  = get_dir('wall_5000',train_dir)
-wall_reverse  = get_dir('wall_reverse',train_dir)
+mild_5000_0 = get_dir('mild_5000_0', train_dir)
+reverse_0 = get_dir('reverse_0', train_dir)
+aggressive_blocking_0 = get_dir('aggressive_blocking_0', train_dir)
 
 
 
-
+wall_timid_0 = get_dir('wall_timid_0', train_dir)
+wall_mild_5000_0 = get_dir('wall_mild_5000_0', train_dir)
+wall_reverse_0 = get_dir('wall_reverse_0', train_dir)
+wall_aggressive_blocking_0 = get_dir('wall_aggressive_blocking_0', train_dir)
 
 # dirs = timid.copy()
 # # dirs.extend(m100)
@@ -49,9 +42,17 @@ wall_reverse  = get_dir('wall_reverse',train_dir)
 # dirs.extend(wall_5000)
 # dirs.extend(wall_reverse)
 
-# dirs = m5000.copy()
+# dirs = test_0.copy()
 dirs = timid_0.copy()
-# dirs.extend(timid)
+# dirs.extend(mild_5000_0)
+# dirs.extend(reverse_0)
+# dirs.extend(aggressive_blocking_0)
+
+# dirs.extend(wall_timid_0)
+# dirs.extend(wall_mild_5000_0)
+# dirs.extend(wall_reverse_0)
+# dirs.extend(wall_aggressive_blocking_0)   
+
 
 # dirs = timid.copy()
 

@@ -32,7 +32,7 @@ def states_to_encoder_input_torch(tar_st,ego_st):
 
 
 class SampleGeneartorCOVGP(SampleGenerator):
-    def __init__(self, abs_path, randomize=False, elect_function=None, init_all=True):
+    def __init__(self, abs_path,pre_load_data_name = None, randomize=False, elect_function=None, init_all=True):
         '''
         abs path: List of absolute paths of directories containing files to be used for training
         randomize: boolean deciding whether samples should be returned in a random order or by time and file
@@ -61,105 +61,123 @@ class SampleGeneartorCOVGP(SampleGenerator):
         self.info = []
         self.means_y = None
         self.stds_y = None
-        
-        
-        for ab_p in self.abs_path:
-            for filename in os.listdir(ab_p):
-                if filename.endswith(".pkl"):
-                    dbfile = open(os.path.join(ab_p, filename), 'rb')
-                    scenario_data: SimData = pickle.load(dbfile)
-    # scenario_def: ScenarioDefinition
-    # N: int
-    # ego_states: List[VehicleState]
-    # tar_states: List[VehicleState]
-    # ego_preds: List[VehiclePrediction] = field(default=List[VehiclePrediction])
-    # tar_preds: List[VehiclePrediction] = field(default=List[VehiclePrediction])
-                    
-                    # scenario_data: RealData = pickle.load(dbfile)
-                    
-                    N = scenario_data.N                       
-                    ######################## random Policy ############################
-                    policy_name = ab_p.split('/')[-2]
-                    policy_gen = False
-                    if policy_name == 'wall':
-                        policy_gen = True
-                        # tar_dynamics_simulator = DynamicsSimulator(0, tar_dynamics_config, track=scenario_data.scenario_def.track)                    
-                        tar_dynamics_simulator = DynamicsSimulator(0, tar_dynamics_config, track=scenario_data.track)                    
-                    ###################################################################
-                    if N > self.time_horizon+5:
-                        for t in range(N-1-self.time_horizon):                            
-                            # define empty torch with proper size 
-                            dat = torch.zeros(self.input_dim, self.time_horizon)
-                            
-                            for i in range(t,t+self.time_horizon):                                
-                                ego_st = scenario_data.ego_states[i]
-                                tar_st = scenario_data.tar_states[i]
-                                ntar_orin = scenario_data.tar_states[i+1]
-                                real_dt = ntar_orin.t - tar_st.t 
-                                # valid_data = self.data_validation(ego_st,tar_st,scenario_data.tar_states[i+1],scenario_data.track)                        
-                                # if valid_data and real_dt > 0.05:
+        pre_load_data_name = "preload_data"
+        # if not dest_path.exists()        
+        if pre_load_data_name is not None:        
+            pre_data_dir =os.path.join(os.path.dirname(abs_path[0]),pre_load_data_name+'.pkl')
+            self.load_pre_data(pre_data_dir)            
+        else:
+            pre_data_dir =os.path.join(os.path.dirname(abs_path[0]),"preload_data.pkl")                        
+            for ab_p in self.abs_path:
+                for filename in os.listdir(ab_p):
+                    if filename.endswith(".pkl"):
+                        dbfile = open(os.path.join(ab_p, filename), 'rb')
+                        scenario_data: SimData = pickle.load(dbfile)                                
+                        # scenario_data: RealData = pickle.load(dbfile)                        
+                        N = scenario_data.N                       
+                        ######################## random Policy ############################
+                        policy_name = ab_p.split('/')[-2]
+                        policy_gen = False
+                        if policy_name == 'wall':
+                            policy_gen = True
+                            # tar_dynamics_simulator = DynamicsSimulator(0, tar_dynamics_config, track=scenario_data.scenario_def.track)                    
+                            # tar_dynamics_simulator = DynamicsSimulator(0, tar_dynamics_config, track=scenario_data.track)                    
+                            tar_dynamics_simulator = DynamicsSimulator(0, tar_dynamics_config, track=scenario_data.scenario_def.track)                                        
+                        ###################################################################
+                        if N > self.time_horizon+5:
+                            for t in range(N-1-self.time_horizon):                            
+                                # define empty torch with proper size 
+                                dat = torch.zeros(self.input_dim, self.time_horizon)
+                                
+                                for i in range(t,t+self.time_horizon):                                
+                                    ego_st = scenario_data.ego_states[i]
+                                    tar_st = scenario_data.tar_states[i]
+                                    ntar_orin = scenario_data.tar_states[i+1]
+                                    real_dt = ntar_orin.t - tar_st.t 
+                                    # valid_data = self.data_validation(ego_st,tar_st,scenario_data.tar_states[i+1],scenario_data.track)                        
+                                    # if valid_data and real_dt > 0.05:
+                                        # dt = 0.1                        
+                                        # ntar_st = interp_state_with_vel(scenario_data.track, tar_st,ntar_orin,dt).copy()
+
+
+
+                                    if policy_gen:
+                                        scenario_data.tar_states[i+1] = policy_generator(tar_dynamics_simulator,scenario_data.tar_states[i])                  
+                                        ntar_orin = scenario_data.tar_states[i+1]
+                                    # [(tar_s-ego_s), ego_ey, ego_epsi, ego_cur,
+                                    #                 tar_ey, tar_epsi, tar_cur]                                 
+                                    dat[:,i-t]=states_to_encoder_input_torch(tar_st, ego_st)
+                                    # torch.tensor([ tar_st.p.s - ego_st.p.s,
+                                    #                             ego_st.p.x_tran,
+                                    #                             ego_st.p.e_psi,
+                                    #                             ego_st.lookahead.curvature[0],                                                            
+                                    #                             tar_st.p.x_tran,
+                                    #                             tar_st.p.e_psi,
+                                    #                             tar_st.lookahead.curvature[0]])
+                                        
+                                
+                                ### Add curvature[2] at the last dimension 
+                                
+                                next_tar_st = ntar_orin.copy()
+                                real_dt = next_tar_st.t - tar_st.t 
+                                valid_data = self.data_validation(ego_st,tar_st,next_tar_st,scenario_data.scenario_def.track)                        
+                                if valid_data and real_dt > 0.05:
                                     # dt = 0.1                        
-                                    # ntar_st = interp_state_with_vel(scenario_data.track, tar_st,ntar_orin,dt).copy()
-
-
-
-                                if policy_gen:
-                                    scenario_data.tar_states[i+1] = policy_generator(tar_dynamics_simulator,scenario_data.tar_states[i])                  
-                                # [(tar_s-ego_s), ego_ey, ego_epsi, ego_cur,
-                                #                 tar_ey, tar_epsi, tar_cur]                                 
-                                dat[:,i-t]=states_to_encoder_input_torch(tar_st, ego_st)
-                                # torch.tensor([ tar_st.p.s - ego_st.p.s,
-                                #                             ego_st.p.x_tran,
-                                #                             ego_st.p.e_psi,
-                                #                             ego_st.lookahead.curvature[0],                                                            
-                                #                             tar_st.p.x_tran,
-                                #                             tar_st.p.e_psi,
-                                #                             tar_st.lookahead.curvature[0]])
-                                    
-                            
-                            ### Add curvature[2] at the last dimension 
-                            
-                            next_tar_st = ntar_orin.copy()
-                            real_dt = next_tar_st.t - tar_st.t 
-                            valid_data = self.data_validation(ego_st,tar_st,next_tar_st,scenario_data.scenario_def.track)                        
-                            if valid_data and real_dt > 0.05:
-                                # dt = 0.1                        
-                                # ntar_st = interp_state_with_vel(scenario_data.track, tar_st,next_tar_st,dt).copy()
-                                # # state_input = torch.tensor([tar_st.p.x_tran,
-                                # #                             tar_st.p.e_psi,                                                            
-                                # #                             tar_st.v.v_long,                                                           
-                                # #                             tar_st.v.v_tran,                                                           
-                                # #                             tar_st.lookahead.curvature[0],
-                                # #                             tar_st.lookahead.curvature[2]]).to(torch.device("cuda"))  
-                                # state_input = torch.tensor([   tar_st.p.x_tran,
-                                #                                 tar_st.p.e_psi,                                                            
-                                #                                 tar_st.v.v_long,                                          
-                                #                                 tar_st.lookahead.curvature[0],                                                            
-                                #                                 tar_st.lookahead.curvature[2]]).to(torch.device("cuda"))  
-                                # del_state = self.get_residual_pose_using_kinematicmodel(tar_st,next_tar_st,dt=0.1)
-                                delta_s = next_tar_st.p.s-tar_st.p.s
-                                delta_xtran = next_tar_st.p.x_tran-tar_st.p.x_tran
-                                delta_epsi = next_tar_st.p.e_psi-tar_st.p.e_psi
-                                delta_vlong  = next_tar_st.v.v_long-tar_st.v.v_long
-                                gp_output = torch.tensor([delta_s, delta_xtran, delta_epsi, delta_vlong ])                                
-                                # gp_output = torch.tensor(del_state)                                
-                                self.samples.append(dat.clone())  
-                                self.output_data.append(gp_output.clone())    
+                                    # ntar_st = interp_state_with_vel(scenario_data.track, tar_st,next_tar_st,dt).copy()
+                                    # # state_input = torch.tensor([tar_st.p.x_tran,
+                                    # #                             tar_st.p.e_psi,                                                            
+                                    # #                             tar_st.v.v_long,                                                           
+                                    # #                             tar_st.v.v_tran,                                                           
+                                    # #                             tar_st.lookahead.curvature[0],
+                                    # #                             tar_st.lookahead.curvature[2]]).to(torch.device("cuda"))  
+                                    # state_input = torch.tensor([   tar_st.p.x_tran,
+                                    #                                 tar_st.p.e_psi,                                                            
+                                    #                                 tar_st.v.v_long,                                          
+                                    #                                 tar_st.lookahead.curvature[0],                                                            
+                                    #                                 tar_st.lookahead.curvature[2]]).to(torch.device("cuda"))  
+                                    # del_state = self.get_residual_pose_using_kinematicmodel(tar_st,next_tar_st,dt=0.1)
+                                    delta_s = next_tar_st.p.s-tar_st.p.s
+                                    delta_xtran = next_tar_st.p.x_tran-tar_st.p.x_tran
+                                    delta_epsi = next_tar_st.p.e_psi-tar_st.p.e_psi
+                                    delta_vlong  = next_tar_st.v.v_long-tar_st.v.v_long
+                                    gp_output = torch.tensor([delta_s, delta_xtran, delta_epsi, delta_vlong ])                                
+                                    # gp_output = torch.tensor(del_state)                                
+                                    self.samples.append(dat.clone())  
+                                    self.output_data.append(gp_output.clone())    
+                                
                             
                         
-                    
-                    dbfile.close()
+                        dbfile.close()
+            self.save_pre_data(pre_data_dir)
+        
+        
         self.input_output_normalizing()
         print('Generated Dataset with', len(self.samples), 'samples!')
         
         # if randomize:
         #     random.shuffle(self.samples)
     
-  
+    
+    def load_pre_data(self,pre_data_dir):        
+        model = pickle_read(pre_data_dir)
+        self.samples = model['samples']
+        self.output_data = model['output_data']    
+        print('Successfully loaded data')
+
+    def save_pre_data(self,pre_data_dir):
+        model_to_save = dict()
+        model_to_save['samples'] = self.samples
+        model_to_save['output_data'] = self.output_data
+        pickle_write(model_to_save,pre_data_dir)
+        print('Successfully saved data')
+
     def normalize(self,data):
         mean = torch.mean(data,dim=0)
         std = torch.std(data,dim=0)        
-        new_data = (data - mean.repeat(data.shape[0],1,1))/std         
+        if len(data.shape) ==2 :
+            new_data = (data - mean.repeat(data.shape[0],1))/std         
+        elif len(data.shape) ==3:
+            new_data = (data - mean.repeat(data.shape[0],1,1))/std         
         return new_data, mean, std
 
     def input_output_normalizing(self,name = 'normalizing'):
@@ -167,11 +185,10 @@ class SampleGeneartorCOVGP(SampleGenerator):
         tensor_output = torch.stack(self.output_data)
         self.normalized_sample, mean_sample, std_sample= self.normalize(tensor_sample)
         self.normalized_output, mean_output, std_output = self.normalize(tensor_output)        
-
         model_to_save = dict()
         model_to_save['mean_sample'] = mean_sample
         model_to_save['std_sample'] = std_sample
-        model_to_save['mean_sample'] = mean_output
+        model_to_save['mean_output'] = mean_output
         model_to_save['std_output'] = std_output
         pickle_write(model_to_save, os.path.join(model_dir, name + '.pkl'))
         print('Successfully saved normalizing constnats', name)
@@ -188,21 +205,21 @@ class SampleGeneartorCOVGP(SampleGenerator):
         kinmatic_nstate.p.s = state.p.s + dt * ( (vx * np.cos(epsi) - vy * np.sin(epsi)) / (1 - curs * ey) )
         kinmatic_nstate.p.x_tran = state.p.x_tran + dt * (vx * np.sin(epsi) + vy * np.cos(epsi))
         kinmatic_nstate.p.e_psi = state.p.e_psi + dt * ( wz - (vx * np.cos(epsi) - vy * np.sin(epsi)) / (1 - curs * ey) * curs )
-        delta_state = [kinmatic_nstate.p.x_tran - nstate.p.x_tran, kinmatic_nstate.p.e_psi - nstate.p.e_psi, nstate.v.v_long - state.v.v_long]
+        delta_state = [nstate.p.s - kinmatic_nstate.p.s, nstate.p.x_tran - kinmatic_nstate.p.x_tran, nstate.p.e_psi - kinmatic_nstate.p.e_psi, nstate.v.v_long - state.v.v_long]
         return delta_state
         
         
      
     def data_validation(self,ego_st: VehicleState,tar_st: VehicleState,ntar_st: VehicleState,track : RadiusArclengthTrack):
         valid_data = True
-        if ego_st.p.s > track.track_length/2.0+0.5 or tar_st.p.s > track.track_length/2.0+0.5:
-            valid_data = False
+        # if ego_st.p.s > track.track_length/2.0+0.5 or tar_st.p.s > track.track_length/2.0+0.5:
+        #     valid_data = False
         
         if abs(ego_st.p.x_tran) > track.track_width or abs(tar_st.p.x_tran) > track.track_width:
             valid_data = False
 
-        if ntar_st.p.s > track.track_length/2.0+0.5:
-            valid_data = False
+        # if ntar_st.p.s > track.track_length/2.0+0.5:
+        #     valid_data = False
         
         if abs(ntar_st.p.x_tran) > track.track_width:
             valid_data = False

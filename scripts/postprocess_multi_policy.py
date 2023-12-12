@@ -16,7 +16,7 @@ from barcgp.h2h_configs import *
 
 total_runs = 100
 track_width = width
-blocking_threshold = 0.2  # Percentage of track x_tran movement to consider for blocking
+blocking_threshold = 1.0  # Percentage of track x_tran movement to consider for blocking
 
 policy_name = 'reverse'
 policy_dir = os.path.join(eval_dir, policy_name)
@@ -314,7 +314,8 @@ def multi_policy_lat_lon_error(sim_data : EvalData):
         ego_states = sim_data.ego_states[timeStep]
         tar_states = sim_data.tar_states[timeStep] 
         data_skip = True
-        if (tar_states.p.s - ego_states.p.s) < 0.5 and  (tar_states.p.s - ego_states.p.s) > 0.0:
+        # if (tar_states.p.s - ego_states.p.s) < 0.5 and  (tar_states.p.s - ego_states.p.s) > 0.0:
+        if abs(tar_states.p.s - ego_states.p.s) < 1.0:
             data_skip = False
         if data_skip: 
             continue
@@ -574,7 +575,7 @@ def main(args=None):
     
     
     # policy_names = ['timid', 'mild_200', 'aggressive_blocking',  'mild_5000' ,'reverse']
-    policy_names = ['timid', 'aggressive_blocking', 'mild_200',  'mild_5000' ,'reverse']
+    policy_names = ['mild_200', 'aggressive_blocking', 'mild_5000', 'reverse']
     # policy_names = [ 'mild_200', 'aggressive_blocking',  'mild_5000' ,'reverse']
     
     for j in range(len(policy_names)):        

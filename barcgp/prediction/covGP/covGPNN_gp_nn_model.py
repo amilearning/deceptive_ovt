@@ -98,33 +98,55 @@ class CNNModel(nn.Module):
         self.n_time_step = args['n_time_step']        
         
         self.seq_conv = nn.Sequential(
-        nn.utils.spectral_norm(nn.Conv1d(in_channels=self.input_dim, out_channels=8, kernel_size=3)),        
-        nn.ReLU(),        
-        nn.utils.spectral_norm(nn.Conv1d(in_channels=8, out_channels=8, kernel_size=3)),        
-        nn.ReLU(),        
-        nn.utils.spectral_norm(nn.Conv1d(in_channels=8, out_channels=1, kernel_size=3)),        
-        nn.ReLU(),        
+        nn.Conv1d(in_channels=self.input_dim, out_channels=16, kernel_size=3),        
+        nn.LeakyReLU(),        
+         nn.Conv1d(in_channels=16, out_channels=16, kernel_size=3),        
+         nn.LeakyReLU(),        
+         nn.Conv1d(in_channels=16, out_channels=16, kernel_size=3),    
+         nn.LeakyReLU(),       
+        nn.Conv1d(in_channels=16, out_channels=6, kernel_size=3)     
         ) 
+        a = torch.randn(1, self.input_dim,self.n_time_step, requires_grad=False)
         
         self.auc_conv_out_size = self._get_conv_out_size(self.seq_conv,self.input_dim,self.n_time_step)        
         
-        # self.seq_fc = nn.Sequential(
-        #         nn.utils.spectral_norm(nn.Linear(self.auc_conv_out_size, 12)),        
-        #         nn.ReLU(),                                    
-        #         nn.utils.spectral_norm(nn.Linear(12, 8)),        
-        #         nn.ReLU(),                                    
-        #         nn.utils.spectral_norm(nn.Linear(8, self.output_dim))                               
-        # )
+        self.encoder_fc = nn.Sequential(
+                # nn.utils.spectral_norm(nn.Linear(self.auc_conv_out_size, 12)),        
+                nn.Linear(self.auc_conv_out_size, 12),        
+                nn.LeakyReLU(),                                    
+                nn.Linear(12, 8),        
+                nn.LeakyReLU(),                                    
+                nn.Linear(8, self.output_dim)                               
+        )
+
+        self.decoder_fc = nn.Sequential(
+                nn.Linear(self.output_dim, 12),        
+                nn.LeakyReLU(),                                    
+                nn.Linear(12, 8),        
+                nn.LeakyReLU(),                                    
+                nn.Linear(8, self.auc_conv_out_size)                               
+        )
 
         self.seq_deconv = nn.Sequential(
-            nn.utils.spectral_norm(nn.ConvTranspose1d(in_channels=1, out_channels=8, kernel_size=3)),  
-            nn.ReLU(),
-            nn.utils.spectral_norm(nn.ConvTranspose1d(in_channels=8, out_channels=8, kernel_size=3)),  
-            nn.ReLU(),
-            nn.utils.spectral_norm(nn.ConvTranspose1d(in_channels=8, out_channels=self.input_dim, kernel_size=3)),  
-            nn.ReLU(),
-        )
-     
+            nn.ConvTranspose1d(in_channels=6, out_channels=16, kernel_size=3),
+            nn.LeakyReLU(),
+            nn.ConvTranspose1d(in_channels=16, out_channels=16, kernel_size=3),
+            nn.LeakyReLU(),
+            nn.ConvTranspose1d(in_channels=16, out_channels=16, kernel_size=3),
+            nn.LeakyReLU(),
+            nn.ConvTranspose1d(in_channels=16, out_channels=self.input_dim, kernel_size=3)
+        )   
+        
+        # dummy_input = torch.randn(1, self.input_dim,self.n_time_step, requires_grad=False)
+        # # dummy_ou_dim = self.seq_deconv(self.decoder_fc(self.encoder_fc(self.seq_conv(dummy_input)))).view(-1).size(0)
+        # self.post_fc = nn.Sequential(
+        #         nn.Linear(dummy_ou_dim, 12),        
+        #         nn.LeakyReLU(),                                    
+        #         nn.Linear(12, 12),        
+        #         nn.LeakyReLU(),                          
+        #         nn.Linear(12, self.input_dim *self.n_time_step)                               
+        # )   
+       
 
     def _get_conv_out_size(self, model, input_dim, seq_dim):
         # dummy_input = torch.randn(1, input_dim, seq_dim, requires_grad=False).to(self.gpu_id).float()         
@@ -133,12 +155,16 @@ class CNNModel(nn.Module):
         return conv_output.view(-1).size(0)
     
     def get_latent(self,x):
-        return self.seq_conv(x)
+        x = self.seq_conv(x)
+        # x = self.encoder_fc(x)
+        return x
 
     def forward(self, x):       
         latent = self.get_latent(x) 
-        # x = self.seq_fc(x)
+        # y = self.decoder_fc(latent)        
         y = self.seq_deconv(latent)
+        # z = self.post_fc(y.view(y.shape[0],-1))
+        # z = z.view(z.shape[0],x.shape[1],x.shape[2])
         return y, latent
         
 
@@ -151,12 +177,14 @@ class COVGPNNModel(gpytorch.Module):
         self.args = args                
         self.nn_input_dim = args['input_dim']        
         self.n_time_step = args['n_time_step']     
-        self.gp_input_dim = args['latent_dim'] 
+        # self.gp_input_dim = args['latent_dim']+3 
         self.gp_output_dim =  args['gp_output_dim']        
         self.seq_len = args['n_time_step']
         inducing_points = args['inducing_points']
         
         self.covnn = CNNModel(args)                
+        
+        self.gp_input_dim = self.covnn.auc_conv_out_size + 3
         self.gp_layer = CovSparseGP(inducing_points_num=inducing_points,
                                                         input_dim=self.gp_input_dim,
                                                         num_tasks=self.gp_output_dim)  # Independent        
@@ -204,17 +232,23 @@ class COVGPNNModel(gpytorch.Module):
             recons, latent_x = self.covnn(input_data)
         else:
             latent_x = self.covnn.get_latent(input_data)
+        
+        if latent_x.shape[0] == 1:
+            gp_input = torch.hstack([ latent_x.reshape(1,-1) , input_data[:,1:4,-1]])
+        else:
+            gp_input = torch.hstack([latent_x.view(input_data.shape[0],-1), input_data[:,1:4,-1]])
+          
         # exp_dir_pred = dir_pred.reshape(dir_pred.shape[0],-1,5)        
         # # remap to [batch , sqeucen, feature]  -> [batch x sqeucen, feature + 1 (temporal encoding)]                        
         if train:
-            pred = self.gp_layer(latent_x.squeeze())
+            pred = self.gp_layer(gp_input)
             input_covs = self.compute_coeef(input_data)
             output_covs = []
         # F.mse_loss(recons, input)  
             for i in range(self.gp_layer.covar_module.base_kernel.batch_shape[0]):
                 cov = gpytorch.kernels.MaternKernel(nu=1.5).to("cuda")
                 cov.lengthscale =  self.gp_layer.covar_module.base_kernel.lengthscale[i]
-                cout = cov(latent_x.squeeze()).evaluate().clone()
+                cout = cov(latent_x.view(input_data.shape[0],-1)).evaluate().clone()
                 output_covs.append(cout)
             output_covs = torch.stack(output_covs)
             
@@ -222,13 +256,8 @@ class COVGPNNModel(gpytorch.Module):
 
         # q = output.covariance_matrix.detach().cpu().numpy()
         
-        
         else:
-            if latent_x.shape[0] == 1:
-                latent_x = latent_x.reshape(1,-1) 
-            else:
-                latent_x = latent_x.squeeze() 
-            pred = self.gp_layer(latent_x)
+            pred = self.gp_layer(gp_input)
             return pred
                 
 

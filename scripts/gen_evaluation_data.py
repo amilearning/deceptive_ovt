@@ -26,7 +26,7 @@ from barcgp.prediction.covGP.covGPNN_predictor import CovGPPredictor
 
 total_runs = 1
 M = 50
-target_policy_name = 'timid'
+target_policy_name = 'aggressive_blocking'
 folder_name = 'timid1209'
 tp_model_name = 'tphmcl' # this is not used 
 gp_model_name = 'gpberkely'
@@ -38,8 +38,8 @@ policy_dir = os.path.join(eval_dir, folder_name)
 predictors = [GPPredictor(N, None, gp_model_name, True, M, cov_factor=np.sqrt(2)),
                 # GPPredictor(N, None, gp_model_name, True, M, cov_factor=1),
                     # GPPredictor(N, None, gp_model_name, True, M, cov_factor=np.sqrt(0.5)),
-                    GPPredictor(N, None, gp_model_name, True, M, cov_factor=np.sqrt(2)),
-                    # CovGPPredictor(N, None, tp_model_name, True, M, cov_factor=np.sqrt(2)),                                                    
+                    # GPPredictor(N, None, gp_model_name, True, M, cov_factor=np.sqrt(2)),
+                    CovGPPredictor(N, None, tp_model_name, True, M, cov_factor=np.sqrt(2)),                                                    
                 ConstantAngularVelocityPredictor(N, cov=.01),
                 # ConstantAngularVelocityPredictor(N, cov=.005),
                 # ConstantAngularVelocityPredictor(N, cov=.0),
@@ -74,13 +74,14 @@ def main(args=None):
     d = 0
 
 ##############################################################################################
-    k=0
+    k=1
     scen = scen_gen.genScenario()
     predictors[k].track = scen.track
     runSimulation(dt, t, N, names[k], predictors[k], scen, 0, 0)
+    return 
 ##############################################################################################
 
-    return 
+  
     for i in range(total_runs):
         scen = scen_gen.genScenario()
         offset =  0 # np.random.uniform(0, 30)
@@ -150,9 +151,13 @@ def runSimulation(dt, t, N, name, predictor, scenario, id, offset=0):
                 ego_pred = mpcc_ego_controller.get_prediction()
                 if ego_pred.x is not None:
                     tv_pred = predictor.get_prediction(ego_sim_state, tar_sim_state, ego_pred, tar_prediction)
-                    gp_tarpred_list.append(tv_pred.copy())
+                    if tv_pred is not None:
+                        gp_tarpred_list.append(tv_pred.copy())
+                    else:
+                        gp_tarpred_list.append(None)
                 else:
                     gp_tarpred_list.append(None)
+                    
             # update control inputs
             info, b, exitflag = mpcc_tv_controller.step(tar_sim_state, tv_state=ego_sim_state, tv_pred=ego_prediction, policy=target_policy_name)
             if not info["success"]:
@@ -193,6 +198,7 @@ def runSimulation(dt, t, N, name, predictor, scenario, id, offset=0):
         ego_config = mpcc_ego_params
 
     multi_policy_sim_data = MultiPolicyEvalData(ego_config = ego_config, tar_config = mpcc_tv_params, evaldata = scenario_sim_data)
+    
     
     smoothPlotResults(scenario_sim_data, speedup=1.6, close_loop=False)
     root_dir = os.path.join(policy_dir, scenario.track_type)
