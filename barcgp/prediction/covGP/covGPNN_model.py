@@ -34,10 +34,12 @@ class COVGPNN(GPController):
             "latent_dim": 4,
             "gp_output_dim": 4,
             "batch_size": 100,
-            "inducing_points" : 300                
+            "inducing_points" : 300,
+            "train_nn" : False                
             }
         else: 
             self.args = args
+        self.train_nn = self.args["train_nn"]
         input_size = self.args["input_dim"]
         output_size = self.args["gp_output_dim"]
         inducing_points = self.args["inducing_points"]
@@ -48,6 +50,7 @@ class COVGPNN(GPController):
         self.train_loader = None
         self.valid_loader = None
         self.test_loader = None
+        
         
 
     def setup_dataloaders(self,train_dataload,valid_dataload, test_dataloader):
@@ -101,15 +104,15 @@ class COVGPNN(GPController):
 
         optimizer = torch.optim.Adam([{'params': self.model.covnn.parameters()}],lr = 0.01)
         lr_gp = 0.005
-        optimizer_gp = torch.optim.Adam([{'params': self.model.covnn.parameters(), 'lr': 0.01},
-                                        {'params': self.model.gp_layer.hyperparameters(), 'lr': 0.005},
-                                        {'params': self.model.gp_layer.variational_parameters()},
-                                        {'params': self.likelihood.parameters()},
-                                    ], lr=lr_gp)
-        # optimizer_gp = torch.optim.Adam([{'params': self.model.gp_layer.hyperparameters(), 'lr': 0.001},
+        # optimizer_gp = torch.optim.Adam([{'params': self.model.covnn.parameters(), 'lr': 0.01},
+        #                                 {'params': self.model.gp_layer.hyperparameters(), 'lr': 0.005},
         #                                 {'params': self.model.gp_layer.variational_parameters()},
         #                                 {'params': self.likelihood.parameters()},
         #                             ], lr=lr_gp)
+        optimizer_gp = torch.optim.Adam([{'params': self.model.gp_layer.hyperparameters(), 'lr': 0.005},
+                                        {'params': self.model.gp_layer.variational_parameters()},
+                                        {'params': self.likelihood.parameters()},
+                                    ], lr=lr_gp)
         scheduler = lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.9)
         scheduler_gp = lr_scheduler.StepLR(optimizer_gp, step_size=5, gamma=0.9)
 
@@ -125,7 +128,7 @@ class COVGPNN(GPController):
         best_model = None
         best_likeli = None
         sys.setrecursionlimit(100000)
-        train_nn = True
+        
         while not done:
         # for _ in range(epochs):
             train_dataloader = tqdm(train_dataloader)
@@ -134,12 +137,12 @@ class COVGPNN(GPController):
             valid_loss = 0
             c_loss = 0
             for step, (train_x, train_y) in enumerate(train_dataloader):    
-                if train_nn:           
+                if self.train_nn:           
                     optimizer.zero_grad()
                     optimizer_gp.zero_grad()
                     output, recons, input_covs, output_covs = self.model(train_x,train=True)
                     reconloss_weight = 1.0
-                    covloss_weight = 0.01
+                    covloss_weight = 0.8
                     # varational_weight = 0.001
                     covloss = mseloss(input_covs, output_covs)* covloss_weight
                     reconloss = mseloss(recons,train_x)* reconloss_weight
@@ -180,11 +183,11 @@ class COVGPNN(GPController):
                     loss.backward()
                     optimizer_gp.step()
             
-            # train_nn = not train_nn
+            # self.train_nn = not self.train_nn
             scheduler.step()
             scheduler_gp.step()
             if epoch % 5 ==0:
-                if train_nn:
+                if self.train_nn:
                     snapshot_name = 'covGPNNOnly' + str(epoch)+ 'snapshot'
                     self.set_evaluation_mode()
                     self.save_model(snapshot_name)
@@ -209,7 +212,7 @@ class COVGPNN(GPController):
             self.writer.add_scalar('Loss/valid_loss', valid_loss, epoch)
             if c_loss > last_loss:
                 if no_progress_epoch >= 10:
-                    if train_nn is False:
+                    if self.train_nn is False:
                         done = True
             else:
                 best_model = copy.copy(self.model)
@@ -374,24 +377,6 @@ class COVGPNNTrained(GPController):
         input_tmp[:,8] = ego_state[:,3]                                           
         roll_input[:,:,-1] = input_tmp
         return roll_input.clone()
-
-    
-    def get_pose_using_kinematicmodel(self,roll_tar_state : torch.tensor, dt = 0.1):
-        # roll_tar_state = M x torch.tensor([target_state.p.s, target_state.p.x_tran, target_state.p.e_psi, target_state.v.v_long]).to('cuda')        
-        kinmatic_nstate = roll_tar_state.clone()
-        s = kinmatic_nstate[:,0]
-         
-        vy =state.v.v_tran
-        curs = state.lookahead.curvature[0]
-        ey = state.p.x_tran
-        epsi = state.p.e_psi
-        wz = state.w.w_psi
-        kinmatic_nstate.p.s = state.p.s + dt * ( (vx * np.cos(epsi) - vy * np.sin(epsi)) / (1 - curs * ey) )
-        kinmatic_nstate.p.x_tran = state.p.x_tran + dt * (vx * np.sin(epsi) + vy * np.cos(epsi))
-        kinmatic_nstate.p.e_psi = state.p.e_psi + dt * ( wz - (vx * np.cos(epsi) - vy * np.sin(epsi)) / (1 - curs * ey) * curs )
-        
-        return kinmatic_nstate
-
 
     
     def sample_traj_gp_par(self, encoder_input,  ego_state: VehicleState, target_state: VehicleState,

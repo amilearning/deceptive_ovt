@@ -44,9 +44,9 @@ wall_aggressive_blocking_0 = get_dir('wall_aggressive_blocking_0', train_dir)
 
 # dirs = test_0.copy()
 dirs = timid_0.copy()
-# dirs.extend(mild_5000_0)
-# dirs.extend(reverse_0)
-# dirs.extend(aggressive_blocking_0)
+dirs.extend(mild_5000_0)
+dirs.extend(reverse_0)
+dirs.extend(aggressive_blocking_0)
 
 # dirs.extend(wall_timid_0)
 # dirs.extend(wall_mild_5000_0)

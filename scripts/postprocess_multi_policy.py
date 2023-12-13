@@ -14,9 +14,9 @@ from barcgp.common.utils.scenario_utils import MultiPolicyEvalData, EvalData, Po
 
 from barcgp.h2h_configs import *
 
-total_runs = 100
+total_runs = 200
 track_width = width
-blocking_threshold = 1.0  # Percentage of track x_tran movement to consider for blocking
+blocking_threshold = 0.5  # Percentage of track x_tran movement to consider for blocking
 
 policy_name = 'reverse'
 policy_dir = os.path.join(eval_dir, policy_name)

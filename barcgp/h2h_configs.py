@@ -150,8 +150,8 @@ mpcc_tv_params = MPCCApproxFullModelParams(
     Qc=50,
     Ql=500.0,
     Q_theta=200.0,
-    # Q_xref=500.0, ## for blocking 
-    Q_xref=0.0, ## for non blocking  
+    Q_xref=500.0, ## for blocking 
+    # Q_xref=0.0, ## for non blocking  
     R_d=5.0,
     R_delta=25.0,
 

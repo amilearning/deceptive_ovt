@@ -161,7 +161,10 @@ def runSimulation(dt, t, N, name, predictor, scenario, id,mpcc_tv_params_,target
                 ego_pred = mpcc_ego_controller.get_prediction()
                 if ego_pred.x is not None:
                     tv_pred = predictor.get_prediction(ego_sim_state, tar_sim_state, ego_pred, tar_prediction)
-                    gp_tarpred_list.append(tv_pred.copy())
+                    if tv_pred is None:
+                        gp_tarpred_list.append(None)
+                    else:
+                        gp_tarpred_list.append(tv_pred.copy())
                 else:
                     gp_tarpred_list.append(None)
             # update control inputs

@@ -35,14 +35,15 @@ def covGPNN_train(dirs = None):
             "n_time_step": 10,
             "latent_dim": 8,
             "gp_output_dim": 4,
-            "inducing_points" : 200                
+            "inducing_points" : 300,
+            "train_nn" : False                
             }
     
     likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks=args["gp_output_dim"]) 
     covgp_predictor = COVGPNN(args, sampGen, IndependentMultitaskGPModelApproximate, likelihood, enable_GPU=True)
                      
-    # snapshot_name = 'covGPNNOnly10snapshot'
-    # covgp_predictor.load_model(snapshot_name)
+    snapshot_name = 'covGPNNOnly25snapshot'
+    covgp_predictor.load_model(snapshot_name)
     covgp_predictor.train(sampGen)
     covgp_predictor.set_evaluation_mode()
     trained_model = covgp_predictor.model, covgp_predictor.likelihood

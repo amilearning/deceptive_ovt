@@ -100,9 +100,9 @@ class CNNModel(nn.Module):
         self.seq_conv = nn.Sequential(
         nn.Conv1d(in_channels=self.input_dim, out_channels=16, kernel_size=3),        
         nn.LeakyReLU(),        
-         nn.Conv1d(in_channels=16, out_channels=16, kernel_size=3),        
+         nn.Conv1d(in_channels=16, out_channels=32, kernel_size=3),        
          nn.LeakyReLU(),        
-         nn.Conv1d(in_channels=16, out_channels=16, kernel_size=3),    
+         nn.Conv1d(in_channels=32, out_channels=16, kernel_size=3),    
          nn.LeakyReLU(),       
         nn.Conv1d(in_channels=16, out_channels=6, kernel_size=3)     
         ) 
