@@ -32,7 +32,7 @@ def states_to_encoder_input_torch(tar_st,ego_st):
 
 
 class SampleGeneartorCOVGP(SampleGenerator):
-    def __init__(self, abs_path,pre_load_data_name = None, randomize=False, elect_function=None, init_all=True):
+    def __init__(self, abs_path,load_normalization_constant = False, pre_load_data_name = None, randomize=False, elect_function=None, init_all=True):
         '''
         abs path: List of absolute paths of directories containing files to be used for training
         randomize: boolean deciding whether samples should be returned in a random order or by time and file
@@ -61,7 +61,7 @@ class SampleGeneartorCOVGP(SampleGenerator):
         self.info = []
         self.means_y = None
         self.stds_y = None
-        pre_load_data_name = "preload_data"
+        # pre_load_data_name = "preload_data"
         # if not dest_path.exists()        
         if pre_load_data_name is not None:        
             pre_data_dir =os.path.join(os.path.dirname(abs_path[0]),pre_load_data_name+'.pkl')
@@ -151,7 +151,7 @@ class SampleGeneartorCOVGP(SampleGenerator):
             self.save_pre_data(pre_data_dir)
         
         
-        self.input_output_normalizing()
+        self.input_output_normalizing(load_constants=load_normalization_constant)
         print('Generated Dataset with', len(self.samples), 'samples!')
         
         # if randomize:
@@ -171,7 +171,7 @@ class SampleGeneartorCOVGP(SampleGenerator):
         pickle_write(model_to_save,pre_data_dir)
         print('Successfully saved data')
 
-    def normalize(self,data):
+    def normalize(self,data):     
         mean = torch.mean(data,dim=0)
         std = torch.std(data,dim=0)        
         if len(data.shape) ==2 :
@@ -180,18 +180,42 @@ class SampleGeneartorCOVGP(SampleGenerator):
             new_data = (data - mean.repeat(data.shape[0],1,1))/std         
         return new_data, mean, std
 
-    def input_output_normalizing(self,name = 'normalizing'):
+
+    def load_normalizing_consant(self, tensor_sample, tensor_output, name ='normalizing'):        
+        model = pickle_read(os.path.join(model_dir, name + '.pkl'))        
+        means_x = model['mean_sample']
+        means_y = model['mean_output']
+        stds_x = model['std_sample']
+        stds_y = model['std_output']   
+        if len(tensor_sample.shape) ==2 :
+            self.normalized_sample = (tensor_sample - means_x.repeat(tensor_sample.shape[0],1))/stds_x         
+        elif len(tensor_sample.shape) ==3:
+            self.normalized_sample = (tensor_sample - means_x.repeat(tensor_sample.shape[0],1,1))/stds_x      
+
+        if len(tensor_output.shape) ==2 :
+            self.normalized_output = (tensor_output - means_y.repeat(tensor_output.shape[0],1))/stds_y         
+        elif len(tensor_output.shape) ==3:
+            self.normalized_output = (tensor_output - means_y.repeat(tensor_output.shape[0],1,1))/stds_y      
+
+        # self.independent = model['independent'] TODO uncomment        
+        print('Successfully loaded normalizing constants', name)
+
+
+    def input_output_normalizing(self,name = 'normalizing', load_constants = False):
         tensor_sample = torch.stack(self.samples)
         tensor_output = torch.stack(self.output_data)
-        self.normalized_sample, mean_sample, std_sample= self.normalize(tensor_sample)
-        self.normalized_output, mean_output, std_output = self.normalize(tensor_output)        
-        model_to_save = dict()
-        model_to_save['mean_sample'] = mean_sample
-        model_to_save['std_sample'] = std_sample
-        model_to_save['mean_output'] = mean_output
-        model_to_save['std_output'] = std_output
-        pickle_write(model_to_save, os.path.join(model_dir, name + '.pkl'))
-        print('Successfully saved normalizing constnats', name)
+        if load_constants:
+            self.load_normalizing_consant(tensor_sample, tensor_output)
+        else:
+            self.normalized_sample, mean_sample, std_sample= self.normalize(tensor_sample)
+            self.normalized_output, mean_output, std_output = self.normalize(tensor_output)        
+            model_to_save = dict()
+            model_to_save['mean_sample'] = mean_sample
+            model_to_save['std_sample'] = std_sample
+            model_to_save['mean_output'] = mean_output
+            model_to_save['std_output'] = std_output
+            pickle_write(model_to_save, os.path.join(model_dir, name + '.pkl'))
+            print('Successfully saved normalizing constnats', name)
         
     
     def get_residual_pose_using_kinematicmodel(self,state,nstate, dt = 0.1):

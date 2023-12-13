@@ -97,11 +97,6 @@ class COVGPNN(GPController):
         self.likelihood.train()
 
         # Use the Adam optimizer
-
-                  
-
-
-
         optimizer = torch.optim.Adam([{'params': self.model.covnn.parameters()}],lr = 0.01)
         lr_gp = 0.005
         # optimizer_gp = torch.optim.Adam([{'params': self.model.covnn.parameters(), 'lr': 0.01},
@@ -274,33 +269,40 @@ class COVGPNN(GPController):
         plt.show()
 
 
-    def tsne_evaluate(self):            
-            if self.train_loader is None:
-                return 
-            args = self.train_args
-            
-            ## training
-            count = 0
-            train_iterator = tqdm(
-                    enumerate(self.train_loader), total=len(self.train_loader), desc="training"
-                )
-            model = self.model 
-            model.eval()
-            z_tmp_list = []
-            input_list = []
-            with torch.no_grad():
-                for i, batch_data in train_iterator:    
-                                
-                    count += 1
-                    train_data = batch_data.to(args['device'])                
-                    z_tmp = model.get_latent_z(train_data)
-                    if z_tmp.shape[0] == args['batch_size']:
-                        z_tmp_list.append(z_tmp)
-                        input_list.append(train_data)
+
+    def tsne_evaluate(self,sampGen: SampleGeneartorCOVGP):
+        
+        self.writer = SummaryWriter()
+        train_dataset, val_dataset, test_dataset  = sampGen.get_datasets()
+        batch_size = self.args["batch_size"]
+        dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)  
+
+        if self.enable_GPU:
+            self.model = self.model.cuda()
+            self.likelihood = self.likelihood.cuda()
+        # Find optimal model hyper-parameters
+        self.model.eval()
+        self.likelihood.eval()
+        
+        z_tmp_list = []
+        input_list = []
+        
+        for step, (data_x, data_y) in enumerate(dataloader):    
+            with torch.no_grad(), gpytorch.settings.fast_pred_var():
+                latent_x = self.model.get_hidden(data_x)
+                
+                delta_s_avg = torch.mean(data_x[:,0,:],dim=1)
+                selected_latent_x = latent_x[(delta_s_avg<0.5)*(delta_s_avg>0.0),:,:]
+                selected_data_x = data_x[(delta_s_avg<0.5)*(delta_s_avg>0.0),:,:]
+
+                z_tmp_list.append(selected_latent_x.view(selected_latent_x.shape[0],-1))
+                input_list.append(selected_data_x)
                 stacked_z_tmp = torch.cat(z_tmp_list, dim=0)
                 input_list_tmp= torch.cat(input_list, dim=0)
 
-            return stacked_z_tmp, input_list_tmp
+        return stacked_z_tmp, input_list_tmp
+
+
 
 
 

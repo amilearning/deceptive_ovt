@@ -198,7 +198,7 @@ class COVGPNNModel(gpytorch.Module):
             
             
     def get_hidden(self,input_data):
-        aug_pred = self.covnn(input_data)        
+        aug_pred = self.covnn.get_latent(input_data)        
         return aug_pred
 
     
