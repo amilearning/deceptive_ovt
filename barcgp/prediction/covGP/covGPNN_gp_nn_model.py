@@ -218,10 +218,18 @@ class COVGPNNModel(gpytorch.Module):
         e_psi_diff = input_data[:,2,:]-input_data[:,7,:]
         v_long_diff = input_data[:,3,:]-input_data[:,8,:]        
         input_corrcoefs = []
-        input_corrcoefs.append(torch.corrcoef(s_diff))
+        input_corrcoefs.append(torch.corrcoef(s_diff))        
         input_corrcoefs.append(torch.corrcoef(x_tran_diff))
         input_corrcoefs.append(torch.corrcoef(e_psi_diff))
         input_corrcoefs.append(torch.corrcoef(v_long_diff))
+
+        # or torch.cov        
+        # input_corrcoefs.append(torch.cov(s_diff))        
+        # input_corrcoefs.append(torch.cov(x_tran_diff))
+        # input_corrcoefs.append(torch.cov(e_psi_diff))
+        # input_corrcoefs.append(torch.cov(v_long_diff))
+
+
         input_corrcoefs = torch.stack(input_corrcoefs)
         return input_corrcoefs
         

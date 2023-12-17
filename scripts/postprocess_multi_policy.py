@@ -440,6 +440,45 @@ def parse_metrics(metrics: Metrics, data: PostprocessData, i):
         data.horizon_lateral_rmse.append(metrics.horizon_lateral_rmse)
         data.horizon_longitudinal_rmse.append(metrics.horizon_longitudinal_rmse)
 
+
+def get_lat_lon_mse(processed_data, tmp_policy_name):        
+    last_step_lon_mse = []        
+    last_step_lat_mse = [] 
+    for id, ctrl_name in enumerate(names):
+        if ctrl_name == 'CAV_01' or ctrl_name == 'GP_2' or ctrl_name == 'NLMPC_01' or ctrl_name == 'TP_2 ':
+            ctrl_data = processed_data[ctrl_name]                
+            
+            last_step_lon_data = np.array(ctrl_data.longitudinal_errors)[:,-1]            
+            lon_mse_tmp = np.mean(np.square(last_step_lon_data))
+            last_step_lon_mse.append(lon_mse_tmp)
+
+            last_step_lat_data = np.array(ctrl_data.lateral_errors)[:,-1]
+            lat_mse_tmp = np.mean(np.square(last_step_lat_data))
+            last_step_lat_mse.append(lat_mse_tmp)
+    
+    
+    last_step_lon_mse_np = np.transpose(np.array(last_step_lon_mse)).reshape(1, -1)   
+   
+ 
+    last_step_lon_mse_np_df = pd.DataFrame(last_step_lon_mse_np,columns=['CAV_01', 'GP_2', 'NLMPC_01', 'TP_2'])
+    last_step_lon_mse_np_df['Policy'] = str(tmp_policy_name)
+
+    last_step_lat_mse_np = np.transpose(np.array(last_step_lat_mse)).reshape(1, -1)    
+    last_step_lat_mse_np_df = pd.DataFrame(last_step_lat_mse_np,columns=['CAV_01', 'GP_2', 'NLMPC_01', 'TP_2'])
+    last_step_lat_mse_np_df['Policy'] = str(tmp_policy_name)
+
+    return    last_step_lon_mse_np_df, last_step_lat_mse_np_df
+            
+def get_step_df(step_erros, min_idx, tmp_policy_name):
+    a = []
+    for i in range(len(step_erros)):
+        tmp =  step_erros[i][:min_idx]
+        a.append(tmp)
+    a_np = np.transpose(np.array(a))    
+    df_step = pd.DataFrame(a_np,columns=['CAV_01', 'GP_2', 'NLMPC_01', 'TP_2'])
+    df_step['Policy'] = str(tmp_policy_name)
+    return df_step
+
 def get_lon_lat_df(processed_data, tmp_policy_name):
     first_step_erros_lon = []
     last_step_erros_lon = []
@@ -453,8 +492,9 @@ def get_lon_lat_df(processed_data, tmp_policy_name):
             last_step_erros_lon.append(np.array(ctrl_data.longitudinal_errors)[:,-1])
             
             first_step_erros_lat.append(np.array(ctrl_data.lateral_errors)[:,2])       
-            last_step_erros_lat.append(np.array(ctrl_data.lateral_errors)[:,-1])            
-
+            last_step_erros_lat.append(np.array(ctrl_data.lateral_errors)[:,-1])          
+    
+    
     # Initialize the minimum length as the maximum possible value
  
     # Iterate through the list and update the minimum length if a shorter length is found
@@ -471,15 +511,7 @@ def get_lon_lat_df(processed_data, tmp_policy_name):
     first_step_erros_lat_min_length = get_min_idx(first_step_erros_lat)
     last_step_erros_lat_min_length = get_min_idx(last_step_erros_lat)
 
-    def get_step_df(step_erros, min_idx, tmp_policy_name):
-        a = []
-        for i in range(len(step_erros)):
-            tmp =  step_erros[i][:min_idx]
-            a.append(tmp)
-        a_np = np.transpose(np.array(a))    
-        df_step = pd.DataFrame(a_np,columns=['CAV_01', 'GP_2', 'NLMPC_01', 'TP_2'])
-        df_step['Policy'] = str(tmp_policy_name)
-        return df_step
+
     
     first_step_erros_lon_df = get_step_df(first_step_erros_lon,first_step_erros_lon_min_length,tmp_policy_name)
     last_step_erros_lon_df = get_step_df(last_step_erros_lon,last_step_erros_lon_min_length,tmp_policy_name)
@@ -576,10 +608,11 @@ def main(args=None):
     
     # policy_names = ['timid', 'mild_200', 'aggressive_blocking',  'mild_5000' ,'reverse']
     policy_names = ['mild_200', 'aggressive_blocking', 'mild_5000', 'reverse']
+    policy_names = ['mild_200', 'aggressive_blocking', 'mild_5000']
     # policy_names = [ 'mild_200', 'aggressive_blocking',  'mild_5000' ,'reverse']
     
-    for j in range(len(policy_names)):        
-        get_process(policy_names[j])
+    # for j in range(len(policy_names)):        
+    #     get_process(policy_names[j])
 
     
 
@@ -589,11 +622,17 @@ def main(args=None):
     last_step_erros_lon_df_set = []
     first_step_erros_lat_df_set= []
     last_step_erros_lat_df_set= []
+
+    lon_mse_df_set = []
+    lat_mse_df_set = []
     for tmp_policy_name in policy_names:
         policy_dir = os.path.join(eval_dir, tmp_policy_name)
         tmp_post_path = os.path.join(policy_dir, tmp_policy_name + '.pkl')
         tmp_processed_data = pickle_read(tmp_post_path)                
         first_step_erros_lon_df, last_step_erros_lon_df, first_step_erros_lat_df, last_step_erros_lat_df = get_lon_lat_df(tmp_processed_data, tmp_policy_name)
+        last_step_lon_mse_np_df, last_step_lat_mse_np_df = get_lat_lon_mse(tmp_processed_data, tmp_policy_name)
+        lon_mse_df_set.append(last_step_lon_mse_np_df)
+        lat_mse_df_set.append(last_step_lat_mse_np_df)
         first_step_erros_lon_df_set.append(first_step_erros_lon_df)
         last_step_erros_lon_df_set.append(last_step_erros_lon_df)
         first_step_erros_lat_df_set.append(first_step_erros_lat_df)
@@ -603,16 +642,36 @@ def main(args=None):
         cat_df = pd.concat(df_set)
         cat_df_melted = pd.melt(cat_df, id_vars='Policy', var_name='Policy_Name', value_name=value_name_)
         error_plt= sns.catplot(x='Policy', y=value_name_, hue='Policy_Name', kind='box', data=cat_df_melted,showfliers = False)
+        
         plt.xlabel('Policy')
         plt.ylabel(value_name_)
+        plt.show()
+        # plt.suptitle('Lateral Error', y=1.05)
+        # plt.tight_layout()
+        return error_plt
+
+    def plot_mse_error(df_set,value_name_):
+        cat_df = pd.concat(df_set)
+        cat_df_melted = pd.melt(cat_df, id_vars='Policy', var_name='Policy_Name', value_name=value_name_)
+        # error_plt= sns.catplot(x='Policy', y=value_name_, hue='Policy_Name', kind='box', data=cat_df_melted,showfliers = False)
+        error_plt= sns.barplot(x='Policy', y=value_name_, hue='Policy_Name',  data=cat_df_melted)
+        plt.xlabel('Policy')
+        plt.ylabel(value_name_)
+        plt.show()
         # plt.suptitle('Lateral Error', y=1.05)
         # plt.tight_layout()
         return error_plt
         
     # plot_step_error(first_step_erros_lon_df_set, value_name_ = 'Longitudinal_Error')
-    plot_step_error(last_step_erros_lon_df_set,value_name_ = 'Longitudinal_Error')
     # plot_step_error(first_step_erros_lat_df_set,value_name_ = 'Lateral_Error')
+
+    plot_step_error(last_step_erros_lon_df_set,value_name_ = 'Longitudinal_Error')
     plot_step_error(last_step_erros_lat_df_set,value_name_ = 'Lateral_Error')
+    
+    plot_mse_error(lon_mse_df_set,value_name_ = 'Longitudinal_MSE')
+    
+    
+    plot_mse_error(lat_mse_df_set,value_name_ = 'Lateral_MSE')
     plt.show()
 
 
